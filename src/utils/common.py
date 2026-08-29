@@ -84,6 +84,12 @@ def resolve_episode(
             f"Scene directory not found: {episode_root}. "
             f"Expected layout: <dataset-root>/<hand>/<object>/<scene>."
         )
+    contact_root = dataset_root / hand_dir / object_name / scene_name / "processed"
+    if not contact_root.is_dir():
+        raise FileNotFoundError(
+            f"Scene directory not found: {contact_root}. "
+            f"Expected layout: <dataset-root>/<hand>/<object>/<scene>/<processed>."
+        )
 
     mesh_path = (
         Path(object_mesh).expanduser().resolve()
@@ -350,6 +356,43 @@ def load_robot_qpos(episode_root: str | Path, hand: str) -> Tuple[np.ndarray, np
     hand_qpos = resample_to(hand_time, hand_qpos, arm_time)
     n = min(len(arm_qpos), len(hand_qpos), len(arm_time))
     return np.concatenate([arm_qpos[:n], hand_qpos[:n]], axis=1), arm_time[:n]
+
+
+def load_robot_actions(episode_root: str | Path, hand: str) -> Tuple[np.ndarray, np.ndarray]:
+    episode_root = Path(episode_root)
+    arm_action, arm_time = load_series(
+        episode_root / "raw" / "arm",
+        ("action.npy", "action_qpos.npy"),
+    )
+    arm_position = arm_action[:, :3, 3]
+
+    arm_rotation = R.from_matrix(
+        arm_action[:, :3, :3]
+    )
+
+    arm_rotvec = arm_rotation.as_rotvec()
+
+    arm_action = np.concatenate(
+        [
+            arm_position,
+            arm_rotvec,
+        ],
+        axis=-1,
+    ).astype(np.float32)
+
+    hand_dir = episode_root / "raw" / "hand"
+    if hand == "inspire_f1":
+        hand_action, hand_time = load_series(hand_dir, ("right_commands.npy"))
+    elif hand == "inspire":
+        hand_action, hand_time = load_series(hand_dir, ("action.npy", "position.npy"))
+    elif hand in {"allegro", "allegro_v5"}:
+        hand_action, hand_time = load_series(hand_dir, ("action.npy", "position.npy"))
+    else:
+        raise ValueError(f"Unsupported robot hand: {hand}")
+
+    hand_action = resample_to(hand_time, hand_action, arm_time)
+    n = min(len(arm_action), len(hand_action), len(arm_time))
+    return np.concatenate([arm_action[:n], hand_action[:n]], axis=1), arm_time[:n]
 
 
 def load_robot_qpos_on_video_timeline(

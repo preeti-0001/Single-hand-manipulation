@@ -11,7 +11,7 @@ from scipy.spatial.transform import Rotation as R
 import viser
 from viser.extras import ViserUrdf
 
-from replicate.common import (
+from utils.common import (
     DEFAULT_DATASET_ROOT,
     load_c2r,
     load_camera_params,

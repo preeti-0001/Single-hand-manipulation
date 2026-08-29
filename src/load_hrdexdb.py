@@ -1,11 +1,14 @@
 import numpy as np
 import os
 
-base = "hrdexdb/allegro_v5/apple/4"
+HAND = "allegro_v5"
+OBJECT_NAME = "apple"
+SCENE = "4"
+base = f"hrdexdb/{HAND}/{OBJECT_NAME}/{SCENE}"
 
 
-def inspect(name, path):
-    x = np.load(path)
+def inspect(name, path, allow_pickle=False):
+    x = np.load(path, allow_pickle=allow_pickle)
     print(f"\n{name}")
     print("shape:", x.shape)
     print("dtype:", x.dtype)
@@ -13,11 +16,9 @@ def inspect(name, path):
     print("last :", x[-1] if x.ndim > 0 else x)
 
 
-inspect("HAND POSITION", f"{base}/raw/hand/position.npy")
+for name in ["position", "action", "tactile", "time"]:
+    inspect(f"HAND {name.upper()}", f"{base}/raw/hand/{name}.npy", allow_pickle=True)
 
-inspect("HAND ACTION", f"{base}/raw/hand/action.npy")
-
-inspect("HAND TIME", f"{base}/raw/hand/time.npy")
 
 print("\nOBJECT 6D POSE")
 
@@ -29,7 +30,7 @@ for key in pose.files:
     x = pose[key]
     print(f"EXAMPLE")
     print(f"{key}: shape={x.shape}, dtype={x.dtype}")
-    print("first:", x[0])
+    print("first:", x)
     break
 
 
@@ -41,51 +42,34 @@ print("shape:", C2R.shape)
 print(C2R)
 
 print("\nARM")
-abc=True
+abc = True
 
 for name in ["position", "action", "velocity", "torque", "time"]:
-    path = f"{base}/raw/arm/{name}.npy"
-    print(path)
-    x = np.load(path, allow_pickle=True)
-    if abc:
-        print(type(x))
-        abc=False
-    print(f"{name}: shape={x.shape}, dtype={x.dtype}, " f"first={x[0]}")
+    inspect(f"ARM {name.upper()}", f"{base}/raw/arm/{name}.npy", allow_pickle=True)
 
-arm_time = np.load(
-    f"{base}/raw/arm/time.npy",
-    allow_pickle=True
-).astype(np.float64)
+for name in ["contact_tensor", "validity_mask"]:
+    inspect(f"PROCESSED {name.upper()}", f"{base}/processed/{name}.npy")
 
-hand_time = np.load(
-    f"{base}/raw/hand/time.npy",
-    allow_pickle=True
-).astype(np.float64
-)
-
-frame_id = np.load(
-    f"{base}/raw/timestamps/frame_id.npy",
-    allow_pickle=True
-)
-
-timestamp = np.load(
-    f"{base}/raw/timestamps/timestamp.npy",
-    allow_pickle=True
-).astype(np.float64)
-
+arm_time = np.load(f"{base}/raw/arm/time.npy", allow_pickle=True).astype(np.float64)
 print("ARM")
 print(len(arm_time), arm_time[0], arm_time[-1])
 print("duration:", arm_time[-1] - arm_time[0])
 
+hand_time = np.load(f"{base}/raw/hand/time.npy", allow_pickle=True).astype(np.float64)
 print("\nHAND")
 print(len(hand_time), hand_time[0], hand_time[-1])
 print("duration:", hand_time[-1] - hand_time[0])
 
+frame_id = np.load(f"{base}/raw/timestamps/frame_id.npy", allow_pickle=True)
 print("\nFRAME ID")
 print(frame_id.shape)
 print(frame_id[:20])
 print(frame_id[-20:])
 
+
+timestamp = np.load(f"{base}/raw/timestamps/timestamp.npy", allow_pickle=True).astype(
+    np.float64
+)
 print("\nTIMESTAMP")
 print(timestamp.shape)
 print(timestamp[:20])
@@ -93,7 +77,7 @@ print(timestamp[-20:])
 print("duration:", timestamp[-1] - timestamp[0])
 
 
-path = "hrdexdb/object_6d_pose_v2/allegro_v5/apple_4.npz"
+path = f"hrdexdb/object_6d_pose_v2/{HAND}/{OBJECT_NAME}_{SCENE}.npz"
 
 data = np.load(path)
 
@@ -114,10 +98,7 @@ for key in data.files:
 
 import trimesh
 
-mesh = trimesh.load(
-    "hrdexdb/assets/mesh/apple/apple.obj",
-    force="mesh"
-)
+mesh = trimesh.load(f"hrdexdb/assets/mesh/{OBJECT_NAME}/{OBJECT_NAME}.obj", force="mesh")
 
 print("vertices:", len(mesh.vertices))
 print("faces:", len(mesh.faces))

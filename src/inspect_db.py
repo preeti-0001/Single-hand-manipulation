@@ -1,16 +1,16 @@
 import numpy as np
 from pathlib import Path
 
-object_name = "apple"  # Replace with the actual object name
-hand_name="allegro_v5"
-episode="4"
-episode_path = Path(f"hrdexdb/{hand_name}/{object_name}/{episode}")
+OBJECT_NAME = "apple"  # Replace with the actual object name
+HAND="allegro_v5"
+SCENE="4"
+episode_path = Path(f"hrdexdb/{HAND}/{OBJECT_NAME}/{SCENE}")
 
-for path in episode_path.rglob("*.npy"):
-    print("\nFILE:", path)
+for object_trajectory in episode_path.rglob("*.npy"):
+    print("\nFILE:", object_trajectory)
 
     try:
-        data = np.load(path, allow_pickle=True)
+        data = np.load(object_trajectory, allow_pickle=True)
 
         print("type :", type(data))
         print("shape:", getattr(data, "shape", None))
@@ -23,28 +23,28 @@ for path in episode_path.rglob("*.npy"):
         print("ERROR:", e)
 
 
-path = f"hrdexdb/object_6d_pose_v2/{hand_name}/{object_name}_{episode}.npz"
+object_trajectory = f"hrdexdb/object_6d_pose_v2/{HAND}/{OBJECT_NAME}_{SCENE}.npz"
 
-data = np.load(path)
+object_trajectory_data = np.load(object_trajectory)
 
-print("NPZ FILE:", path)
-print("Keys:", data.files)
+print("NPZ FILE:", object_trajectory)
+print("Keys:", object_trajectory_data.files)
 
-for key in data.files:
+for key in object_trajectory_data.files:
     print(
         key,
-        "shape =", data[key].shape,
-        "dtype =", data[key].dtype
+        "shape =", object_trajectory_data[key].shape,
+        "dtype =", object_trajectory_data[key].dtype
     )
     break
 
 
-base = f"hrdexdb/{hand_name}/{object_name}/{episode}/raw/hand"
+hand_base = f"hrdexdb/{HAND}/{OBJECT_NAME}/{SCENE}/raw/hand"
 
-position = np.load(f"{base}/position.npy")
-action = np.load(f"{base}/action.npy")
-time = np.load(f"{base}/time.npy")
-tactile = np.load(f"{base}/tactile.npy")
+position = np.load(f"{hand_base}/position.npy")
+action = np.load(f"{hand_base}/action.npy")
+time = np.load(f"{hand_base}/time.npy")
+tactile = np.load(f"{hand_base}/tactile.npy")
 
 print("position:", position.shape)
 print("action:", action.shape)

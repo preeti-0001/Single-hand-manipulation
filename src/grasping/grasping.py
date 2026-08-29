@@ -5,13 +5,9 @@ from pathlib import Path
 
 import genesis as gs
 import numpy as np
+from src.utils.common import load_c2r, load_robot_qpos_on_video_timeline, resolve_episode 
 from scipy.spatial.transform import Rotation
 
-from src.utils.common import (
-    resolve_episode,
-    load_robot_qpos_on_video_timeline,
-    load_c2r,
-)
 
 
 # ============================================================
@@ -276,8 +272,12 @@ def main():
 
             scale=1.0,
 
-            # Kinematic replay.
-            fixed=True,
+            # Kinematic replay false.
+            fixed=False,
+
+        ),
+        material=gs.materials.Rigid(
+            friction=1.5,
         )
     )
 
@@ -393,11 +393,17 @@ def main():
         )
 
 
+
         # ====================================================
         # Advance Genesis
         # ====================================================
 
         scene.step()
+
+        # check contacts (grasping)
+        contacts = robot.get_contacts(with_entity=obj)
+
+        print(contacts)
 
 
         # ====================================================
@@ -419,11 +425,11 @@ def main():
         # Debug
         # ====================================================
 
-        print(
-            f"Frame {frame:04d} | "
-            f"Object pos = {position} | "
-            f"Robot qpos = {qpos[frame]}"
-        )
+        # print(
+        #     f"Frame {frame:04d} | "
+        #     f"Object pos = {position} | "
+        #     f"Robot qpos = {qpos[frame]}"
+        # )
 
 
     print("\nReplay finished.")

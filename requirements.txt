@@ -6,3 +6,6 @@ yourdfpy>=0.0.56
 viser>=0.2.0
 pyglet<2
 ffmpeg
+matplotlib
+genesis-world
+torch
