@@ -4,15 +4,7 @@ import time
 from pathlib import Path
 import torch
 
-import genesis as gs
-import numpy as np
-from src.utils.common import (
-    load_object_trajectory,
-    load_robot_qpos_on_video_timeline,
-    resolve_episode,
-)
-from src.utils.math_utils import matrix_to_wxyz, _to_numpy
-import argparse
+from src.utils.math_utils import matrix_to_wxyz
 from .rewards import RewardModule
 from .actor_critic import Actor, Critic
 
@@ -22,7 +14,6 @@ from .actor_critic import Actor, Critic
 
 DATASET_ROOT = Path("hrdexdb")
 FPS = 30.0
-
 
 
 def train_one_episode(
@@ -58,11 +49,13 @@ def train_one_episode(
         object_pos = obj.get_pos()
         object_quat = obj.get_quat()
 
-        state = torch.cat([
-            robot_qpos,
-            object_pos,
-            object_quat,
-        ])
+        state = torch.cat(
+            [
+                robot_qpos,
+                object_pos,
+                object_quat,
+            ]
+        )
 
         # ==================================================
         # ACTOR
@@ -76,11 +69,7 @@ def train_one_episode(
 
         policy_action = policy_dist.sample()
 
-        log_prob = (
-            policy_dist
-            .log_prob(policy_action)
-            .sum()
-        )
+        log_prob = policy_dist.log_prob(policy_action).sum()
 
         # ==================================================
         # CRITIC
@@ -111,9 +100,7 @@ def train_one_episode(
 
         rotation_matrix = T[:3, :3]
 
-        quat_wxyz = matrix_to_wxyz(
-            rotation_matrix
-        )
+        quat_wxyz = matrix_to_wxyz(rotation_matrix)
 
         obj.set_pos(
             position,
@@ -136,13 +123,10 @@ def train_one_episode(
         # ==================================================
 
         current_keypoints = [
-            robot.get_link(link.name).get_pos()
-            for link in robot.links
+            robot.get_link(link.name).get_pos() for link in robot.links
         ]
 
-        current_contacts = robot.get_contacts(
-            with_entity=obj
-        )
+        current_contacts = robot.get_contacts(with_entity=obj)
 
         object_pos_next = obj.get_pos()
         object_quat_next = obj.get_quat()
@@ -180,4 +164,3 @@ def train_one_episode(
         values,
         total_reward,
     )
-

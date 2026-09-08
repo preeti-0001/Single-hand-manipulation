@@ -2,12 +2,11 @@ import torch
 import torch.nn as nn
 from torch.distributions import Normal
 
-
 class Actor(nn.Module):
     def __init__(self, robot_dof):
         super().__init__()
 
-        state_dim = robot_dof + 7 # Robot qpos + Object positions + quaternion
+        state_dim = robot_dof + 7
         action_dim = robot_dof
 
         self.network = nn.Sequential(
@@ -20,23 +19,33 @@ class Actor(nn.Module):
             nn.Linear(256, action_dim),
         )
 
-        # Learnable exploration noise
+        # Start with relatively small exploration
         self.log_std = nn.Parameter(
-            torch.zeros(action_dim)
+            torch.ones(action_dim) * -2.5
         )
 
-    def forward(self, robot_qpos, object_pos, object_quat):
+    def forward(
+        self,
+        robot_qpos,
+        object_pos,
+        object_quat,
+    ):
         state = torch.cat(
-            [robot_qpos, object_pos, object_quat],
-            dim=-1
+            [
+                robot_qpos,
+                object_pos,
+                object_quat,
+            ],
+            dim=-1,
         )
 
         mean = self.network(state)
 
-        std = torch.exp(self.log_std)
+        std = torch.exp(
+            self.log_std
+        )
 
-        return Normal(mean, std)
-    
+        return Normal(mean, std)   
 
 
 class Critic(nn.Module):

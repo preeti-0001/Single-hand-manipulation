@@ -14,7 +14,7 @@ from src.utils.math_utils import matrix_to_wxyz
 import argparse
 from .rewards import RewardModule
 from .actor_critic import Actor, Critic
-from .train_parallel import train_parallel_episode
+from .ppo import train_parallel_episode
 
 # ============================================================
 # CONFIG

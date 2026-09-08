@@ -11,8 +11,7 @@ from scipy.spatial.transform import Rotation as R
 import viser
 from viser.extras import ViserUrdf
 
-from utils.common import (
-    DEFAULT_DATASET_ROOT,
+from src.utils.common import (
     load_c2r,
     load_camera_params,
     load_ego_camera_params,
@@ -27,6 +26,8 @@ from utils.common import (
 def rotation_wxyz(matrix: np.ndarray) -> np.ndarray:
     return R.from_matrix(np.array(matrix, dtype=float, copy=True)).as_quat()[[3, 0, 1, 2]]
 
+
+DATASET_ROOT = Path("hrdexdb")
 
 class SimpleViserUrdf:
     def __init__(
@@ -277,7 +278,7 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="Visualize HRDexDB robot/human object trajectories in viser.")
-    parser.add_argument("--dataset-root", type=Path, default=DEFAULT_DATASET_ROOT)
+    parser.add_argument("--dataset-root", type=Path, default=DATASET_ROOT)
     parser.add_argument(
         "--mesh-root",
         type=Path,
