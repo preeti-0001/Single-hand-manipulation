@@ -1,60 +1,70 @@
 from __future__ import annotations
 
+import argparse
 import time
 from pathlib import Path
 
 import genesis as gs
 import numpy as np
+import torch
+
 from src.utils.common import (
     load_object_trajectory,
     load_robot_qpos_on_video_timeline,
     resolve_episode,
 )
 from src.utils.math_utils import matrix_to_wxyz
-import argparse
-from .rewards import RewardModule
+
 from .actor_critic import Actor, Critic
 from .ppo import train_parallel_episode
+from .rewards import RewardModule
 
-# ============================================================
-# CONFIG
-# ============================================================
 
 DATASET_ROOT = Path("hrdexdb")
 FPS = 30.0
+NUM_ENVS = 128
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Replay an HRDexDB episode in Genesis."
+        description="Train PPO with 128 parallel manipulation environments."
     )
 
     parser.add_argument(
         "--hand",
         required=True,
         type=str,
-        help="Hand name, e.g. allegro_v5",
     )
 
     parser.add_argument(
         "--object_name",
         required=True,
         type=str,
-        help="Object name, e.g. apple",
     )
 
     parser.add_argument(
         "--scene",
         required=True,
         type=str,
-        help="Scene ID, e.g. 4",
     )
 
     parser.add_argument(
         "--num_iterations",
-        required=True,
-        type=str,
-        help="Number of iterations",
+        type=int,
+        default=500,
+    )
+
+    parser.add_argument(
+        "--num_envs",
+        type=int,
+        default=128,
+    )
+
+    parser.add_argument(
+        "--action_scale",
+        type=float,
+        default=0.1,
+        help="Maximum approximate joint delta in radians per policy step.",
     )
 
     return parser.parse_args()
@@ -67,9 +77,13 @@ def main():
     HAND = args.hand
     OBJECT_NAME = args.object_name
     SCENE = args.scene
-    num_iterations = int(args.num_iterations)
 
-    # Resolve HRDexDB episode
+    NUM_PARALLEL_ENVS = args.num_envs
+
+    # ============================================================
+    # DATASET
+    # ============================================================
+
     ep = resolve_episode(
         dataset_root=DATASET_ROOT,
         hand=HAND,
@@ -85,18 +99,16 @@ def main():
     print("Object mesh  :", ep.object_mesh)
     print("=====================================\n")
 
-    # Robot trajectory
+    # ============================================================
+    # DEMONSTRATION
+    # ============================================================
 
-    qpos, video_time, frame_ids, hand_dof, arm_dof = load_robot_qpos_on_video_timeline(
-        ep.episode_root,
-        ep.hand,
+    qpos, video_time, frame_ids, hand_dof, arm_dof = (
+        load_robot_qpos_on_video_timeline(
+            ep.episode_root,
+            ep.hand,
+        )
     )
-
-    print("Robot qpos shape :", qpos.shape)
-    print("Video time shape :", video_time.shape)
-    print("Frame IDs shape  :", frame_ids.shape)
-
-    # Object trajectory
 
     object_poses = load_object_trajectory(
         DATASET_ROOT,
@@ -105,63 +117,53 @@ def main():
         SCENE,
     )
 
-    # Determine replay length
-
-    robot_frames = len(qpos)
-    object_frames = len(object_poses)
-
     timeline_len = min(
-        robot_frames,
-        object_frames,
+        len(qpos),
+        len(object_poses),
     )
 
-    print("\n========== REPLAY ==========")
-    print("Robot frames  :", robot_frames)
-    print("Object frames :", object_frames)
-    print("Replay frames :", timeline_len)
-    print("============================\n")
+    print("Robot qpos shape :", qpos.shape)
+    print("Object frames    :", len(object_poses))
+    print("Timeline length  :", timeline_len)
 
-    # Genesis
+    # ============================================================
+    # GENESIS
+    # ============================================================
 
-    gs.init(backend=gs.gpu, logging_level="warning")
+    gs.init(
+        backend=gs.gpu,
+        logging_level="warning",
+    )
 
     scene = gs.Scene(
-        show_viewer=True,
+        # Headless is important for RL throughput.
+        show_viewer=False,
         sim_options=gs.options.SimOptions(
             dt=1.0 / FPS,
             gravity=(0.0, 0.0, -9.81),
         ),
-        viewer_options=gs.options.ViewerOptions(
-            camera_pos=(0.7, 0.7, 0.45),
-            camera_lookat=(0.0, 0.0, 0.15),
-            camera_fov=40,
-            res=(1280, 720),
-        ),
     )
 
-    #  Ground
-
-    plane = scene.add_entity(gs.morphs.Plane())
-
-    # Robot
+    scene.add_entity(
+        gs.morphs.Plane()
+    )
 
     robot = scene.add_entity(
         gs.morphs.URDF(
             file=str(ep.robot_urdf),
             pos=(0.0, 0.0, 0.0),
             fixed=True,
-            # Required for your current URDF.
             recompute_inertia=True,
         )
     )
-
-    # Object
 
     first_pose = object_poses[0]
 
     first_position = first_pose[:3, 3]
 
-    first_quat = matrix_to_wxyz(first_pose[:3, :3])
+    first_quat = matrix_to_wxyz(
+        first_pose[:3, :3]
+    )
 
     obj = scene.add_entity(
         gs.morphs.Mesh(
@@ -169,7 +171,6 @@ def main():
             pos=first_position,
             quat=first_quat,
             scale=1.0,
-            # Kinematic replay false -> object will follow trajectory via given qpos/vel, not physics.
             fixed=False,
         ),
         material=gs.materials.Rigid(
@@ -177,120 +178,216 @@ def main():
         ),
     )
 
-    # Build
-    scene.build()
+    # ============================================================
+    # 128 PARALLEL WORLDS
+    # ============================================================
 
-    # Robot DOF check
+    scene.build(
+        n_envs=NUM_PARALLEL_ENVS,
+        env_spacing=(1.0, 1.0),
+    )
 
-    print("\n========== ROBOT ==========")
-    print("Genesis qpos size :", robot.n_qs)
-    print("Genesis DOFs      :", robot.n_dofs)
-    print("HRDexDB qpos size :", qpos.shape[1])
-    print("===========================\n")
+    print(
+        f"\nCreated {NUM_PARALLEL_ENVS} parallel worlds."
+    )
 
-    if robot.n_qs != qpos.shape[1]:
-
-        raise RuntimeError(
-            "\nDOF mismatch!\n"
-            f"Genesis robot qpos : {robot.n_qs}\n"
-            f"HRDexDB trajectory : {qpos.shape[1]}"
-        )
-
-    # Replay
-
-    print(f"\nStarting replay " f"({timeline_len} frames @ {FPS} FPS)\n")
-
-    frame_dt = 1.0 / FPS
+    # ============================================================
+    # DOFS
+    # ============================================================
 
     motors_dof_idx = [
-        robot.get_joint(joint.name).dofs_idx_local[0]
-        for i, joint in enumerate(robot.joints)
+        robot.get_joint(
+            joint.name
+        ).dofs_idx_local[0]
+        for joint in robot.joints
     ]
 
-    demo_object_quaternions = []
-    demo_object_trajectories = []
-    demo_robot_trajectories = []
-    demo_actions = []
+    robot_dof = len(motors_dof_idx)
+
+    print("\n========== ROBOT ==========")
+    print("Genesis qpos shape :", robot.get_qpos().shape)
+    print("Genesis DOFs       :", robot.n_dofs)
+    print("HRDexDB qpos shape :", qpos.shape)
+    print("Robot action DOFs  :", robot_dof)
+    print("===========================\n")
+
+    if robot_dof != qpos.shape[1]:
+        raise RuntimeError(
+            "Action DOF mismatch: "
+            f"Genesis={robot_dof}, HRDexDB={qpos.shape[1]}"
+        )
+
+    device = robot.get_qpos().device
+    dtype = robot.get_qpos().dtype
+
+    # ============================================================
+    # DEMO TENSORS
+    # ============================================================
+
+    demo_robot_qpos = torch.as_tensor(
+        qpos[:timeline_len],
+        device=device,
+        dtype=dtype,
+    )
+
+    demo_object_positions = torch.as_tensor(
+        np.asarray(
+            [
+                T[:3, 3]
+                for T in object_poses[:timeline_len]
+            ]
+        ),
+        device=device,
+        dtype=dtype,
+    )
+
+    demo_object_quaternions = torch.as_tensor(
+        np.asarray(
+            [
+                matrix_to_wxyz(
+                    T[:3, :3]
+                )
+                for T in object_poses[:timeline_len]
+            ]
+        ),
+        device=device,
+        dtype=dtype,
+    )
+
+    # ============================================================
+    # DEMO ROBOT KEYPOINTS
+    #
+    # We use the same Genesis model to obtain the target link
+    # trajectory. No physics rollout is used to create the target.
+    # ============================================================
+
+    demo_robot_keypoints = []
 
     for frame in range(timeline_len):
-        start_time = time.perf_counter()
+
         robot.set_dofs_position(
-            qpos[frame],
+            demo_robot_qpos[frame]
+            .unsqueeze(0)
+            .expand(NUM_PARALLEL_ENVS, -1),
             motors_dof_idx,
-        )
-        robot_keypoints = [
-            robot.get_link(link.name).get_pos() for i, link in enumerate(robot.links)
-        ]
-        demo_robot_trajectories.append(robot_keypoints)
-        demo_actions.append(robot.get_qpos()[motors_dof_idx])
-
-        T = object_poses[frame]
-        position = T[:3, 3]
-        rotation_matrix = T[:3, :3]
-        quat_wxyz = matrix_to_wxyz(rotation_matrix)
-
-        # Move object
-        obj.set_pos(
-            position,
             zero_velocity=True,
         )
 
-        obj.set_quat(
-            quat_wxyz,
-            zero_velocity=True,
+        links_pos = robot.get_links_pos()
+
+        # Store only one copy because all 128 environments are
+        # initialized identically during demonstration extraction.
+        demo_robot_keypoints.append(
+            links_pos[0].detach()
         )
 
-        demo_object_trajectories.append(obj.get_pos())
-        demo_object_quaternions.append(obj.get_quat())
+    # ============================================================
+    # CONTACT DEMONSTRATION
+    # ============================================================
 
-        scene.step()
+    output_dir = (
+        ep.episode_root / "processed"
+    )
 
-        elapsed = time.perf_counter() - start_time
-        remaining = frame_dt - elapsed
-        if remaining > 0:
-            time.sleep(remaining)
+    contact_file = (
+        output_dir / "contact_tensor.npy"
+    )
 
-    print("\nReplay finished.")
+    mask_file = (
+        output_dir / "validity_mask.npy"
+    )
 
-    output_dir = ep.episode_root / "processed"
+    demo_contact_tensor = np.load(
+        contact_file
+    )[:timeline_len]
 
-    contact_file = output_dir / "contact_tensor.npy"
-    mask_file = output_dir / "validity_mask.npy"
+    demo_contact_validity = np.load(
+        mask_file
+    )[:timeline_len]
 
-    demo_contact_tensor = np.load(contact_file)
-    demo_contact_validity = np.load(mask_file)
+    # ============================================================
+    # REWARD
+    # ============================================================
 
     reward_module = RewardModule(
-        demo_contact_tensor,
-        demo_object_trajectories,
-        demo_object_quaternions,
-        demo_robot_trajectories,
-        demo_contact_validity,
-        hand_dof,
-        arm_dof,
-        timeline_len,
-        demo_actions,
+        demo_contact_tensor=demo_contact_tensor,
+        demo_contact_validity=demo_contact_validity,
+        demo_robot_keypoints=demo_robot_keypoints,
+        demo_robot_qpos=demo_robot_qpos,
+        demo_object_trajectories=demo_object_positions,
+        demo_object_quaternions=demo_object_quaternions,
+
+        # Reward design:
+        #
+        # Robot trajectory and object trajectory are primary.
+        # Contact and BC are auxiliary.
+        beta_imitation=10.0,
+        beta_contact=10.0,
+        beta_position=10.0,
+        beta_rotation=5.0,
+        beta_bc=2.0,
+
+        lambda_task=1.0,
+        lambda_imitation=1.0,
+        lambda_contact=0.2,
+        lambda_bc=0.1,
     )
 
-    actor = Actor(hand_dof + arm_dof)
+    # ============================================================
+    # ACTOR / CRITIC
+    # ============================================================
 
-    critic = Critic(hand_dof + arm_dof)
+    actor = Actor(
+        robot_dof=robot_dof,
+    ).to(device)
+
+    critic = Critic(
+        robot_dof=robot_dof,
+    ).to(device)
+
+    print(
+        "Actor parameters :",
+        sum(
+            p.numel()
+            for p in actor.parameters()
+        ),
+    )
+
+    print(
+        "Critic parameters:",
+        sum(
+            p.numel()
+            for p in critic.parameters()
+        ),
+    )
+
+    # ============================================================
+    # TRAIN
+    # ============================================================
+
+    print(
+        "\n========== PPO TRAINING =========="
+    )
 
     train_parallel_episode(
-        reward_module,
-        actor,
-        critic,
-        scene,
-        robot,
-        obj,
-        timeline_len,
-        motors_dof_idx,
-        object_poses,
-        128,
-        num_iterations,
+        reward_module=reward_module,
+        actor=actor,
+        critic=critic,
+        scene=scene,
+        robot=robot,
+        obj=obj,
+        timeline_len=timeline_len,
+        motors_dof_idx=motors_dof_idx,
+        demo_robot_qpos=demo_robot_qpos,
+        demo_object_positions=demo_object_positions,
+        demo_object_quaternions=demo_object_quaternions,
+        num_episodes=args.num_iterations,
+        action_scale=args.action_scale,
     )
 
-    print("\n========== TRAINING RESULTS ==========")
+    print(
+        "\n========== TRAINING COMPLETE =========="
+    )
 
 
 if __name__ == "__main__":

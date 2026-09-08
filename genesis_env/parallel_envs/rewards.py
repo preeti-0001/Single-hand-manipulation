@@ -1,186 +1,251 @@
+from __future__ import annotations
+
 import torch
 from src.utils.reward_utils import position_distance, rotation_distance
-from scipy.spatial.transform import Rotation
 
 
 class RewardModule:
+    """
+    All reward functions are batch-aware.
+
+    Every reward returned by this class has shape [num_envs].
+    """
+
     def __init__(
         self,
         demo_contact_tensor,
+        demo_contact_validity,
+        demo_robot_keypoints,
+        demo_robot_qpos,
         demo_object_trajectories,
         demo_object_quaternions,
-        demo_robot_trajectories,
-        demo_contact_validity,
-        hand_dof,
-        arm_dof,
-        timeline_len,
-        demo_actions,
-        beta_imitation=0.1,
-        beta_contact=0.3,
-        beta_position=1.0,
-        beta_rotation=20.0,
-        beta_angle=5.0,
+        beta_imitation=10.0,
+        beta_contact=10.0,
+        beta_position=10.0,
+        beta_rotation=5.0,
         beta_bc=2.0,
-        lambda_task=0.5,
-        lambda_imitation=0.1,
-        lambda_contact=0.3,
+        lambda_task=1.0,
+        lambda_imitation=1.0,
+        lambda_contact=0.2,
         lambda_bc=0.1,
         contact_dmax=0.05,
     ):
+        self.demo_contact_tensor = demo_contact_tensor
+        self.demo_contact_validity = demo_contact_validity
+
+        self.demo_robot_keypoints = demo_robot_keypoints
+        self.demo_robot_qpos = demo_robot_qpos
+
+        self.demo_object_trajectories = demo_object_trajectories
+        self.demo_object_quaternions = demo_object_quaternions
+
         self.beta_imitation = beta_imitation
         self.beta_contact = beta_contact
         self.beta_position = beta_position
         self.beta_rotation = beta_rotation
-        self.beta_angle = beta_angle
         self.beta_bc = beta_bc
+
         self.lambda_task = lambda_task
         self.lambda_imitation = lambda_imitation
         self.lambda_contact = lambda_contact
         self.lambda_bc = lambda_bc
+
         self.contact_dmax = contact_dmax
-        self.demo_contact_tensor = demo_contact_tensor
-        self.demo_object_trajectories = demo_object_trajectories
-        self.demo_object_quaternions = demo_object_quaternions
-        self.demo_robot_trajectories = demo_robot_trajectories
-        self.demo_contact_validity = demo_contact_validity
-        self.demo_actions = demo_actions
-        self.hand_dof = hand_dof
-        self.arm_dof = arm_dof
-        self.timeline_len = timeline_len
 
-    def compute_motion_imitation_reward(self, current_keypoints, frame_id):
-        demo_keypoints = self.demo_robot_trajectories[frame_id]
-        pred_keypoints = current_keypoints
-        demo = torch.stack(demo_keypoints)  # [23, 3]
-        pred = torch.stack(pred_keypoints)  # [23, 3]
+    @staticmethod
+    def _tensor(x, device, dtype=None):
+        t = torch.as_tensor(x, device=device)
+        if dtype is not None:
+            t = t.to(dtype)
+        return t
 
-        # Squared Euclidean distance for each keypoint
-        dist_sq = torch.sum((pred - demo) ** 2, dim=1)  # [23]
+    def compute_motion_imitation_reward(
+        self,
+        current_keypoints,
+        target_frame,
+    ):
+        # current_keypoints: [N, L, 3]
+        demo = self._tensor(
+            self.demo_robot_keypoints[target_frame],
+            current_keypoints.device,
+            current_keypoints.dtype,
+        )  # [L, 3]
 
-        r_i = torch.exp(-self.beta_imitation * dist_sq)  # [23]
+        dist_sq = (
+            current_keypoints - demo.unsqueeze(0)
+        ).pow(2).sum(dim=-1)
 
-        # Overall reward
-        R = r_i.mean()
-        return R
+        # Mean link error -> reward in (0,1].
+        return torch.exp(
+            -self.beta_imitation * dist_sq
+        ).mean(dim=-1)
 
-    def compute_contact_reward(self, current_contacts, frame_id):
-
-        # ==================================================
-        # Genesis actual contact positions
-        # ==================================================
-
-        current_positions = current_contacts["position"]
-
-        # ==================================================
-        # Demo contact data
-        # ==================================================
-
-        demo_positions = torch.as_tensor(
-            self.demo_contact_tensor[frame_id],
-            dtype=current_positions.dtype,
-            device=current_positions.device,
-        ).squeeze(
-            0
-        )  # (23, 3)
-
-        demo_validity = torch.as_tensor(
-            self.demo_contact_validity[frame_id],
-            dtype=torch.bool,
-            device=current_positions.device,
-        ).squeeze(
-            0
-        )  # (23,)
-
-        # Only contact points that actually exist
-        demo_positions = demo_positions[demo_validity]
-
-        # No demonstrated contacts
-        if demo_positions.shape[0] == 0:
-
-            # If there are no demo contacts and no actual contacts,
-            # that's correct.
-            if current_positions.shape[0] == 0:
-                return torch.ones(
-                    (),
-                    device=current_positions.device,
-                    dtype=current_positions.dtype,
-                )
-
-            # Demo says no contact, but robot has contact.
-            return torch.zeros(
-                (),
-                device=current_positions.device,
-                dtype=current_positions.dtype,
-            )
-
-        # ==================================================
-        # Demo has contacts, but robot currently has none
-        # ==================================================
-
-        if current_positions.shape[0] == 0:
-
-            return torch.exp(
-                torch.tensor(
-                    -self.beta_contact * self.contact_dmax,
-                    device=current_positions.device,
-                    dtype=current_positions.dtype,
-                )
-            )
-
-        # ==================================================
-        # Distance between demo and actual contacts
-        # ==================================================
-
-        distances = torch.cdist(
-            demo_positions,
-            current_positions,
-            p=2.0,
+    def compute_task_reward(
+        self,
+        object_pos,
+        object_quat,
+        target_frame,
+    ):
+        demo_pos = self._tensor(
+            self.demo_object_trajectories[target_frame],
+            object_pos.device,
+            object_pos.dtype,
         )
 
-        # For each DEMO contact, find closest actual contact
-        min_distances = distances.min(dim=1).values
+        demo_quat = self._tensor(
+            self.demo_object_quaternions[target_frame],
+            object_quat.device,
+            object_quat.dtype,
+        )
 
-        # Prevent excessively large distances
+        # Normalize quaternions before using them.
+        object_quat = object_quat / (
+            object_quat.norm(dim=-1, keepdim=True) + 1e-8
+        )
+        demo_quat = demo_quat / (
+            demo_quat.norm(dim=-1, keepdim=True) + 1e-8
+        )
+
+        dpos = position_distance(
+            object_pos,
+            demo_pos,
+        )
+
+        drot = rotation_distance(
+            object_quat,
+            demo_quat,
+        )
+
+        return (
+            torch.exp(-self.beta_position * dpos)
+            * torch.exp(-self.beta_rotation * drot)
+        )
+
+    def compute_behaviour_cloning_reward(
+        self,
+        delta_q,
+        frame_id,
+    ):
+        if frame_id >= len(self.demo_robot_qpos) - 1:
+            return torch.ones(
+                delta_q.shape[0],
+                device=delta_q.device,
+                dtype=delta_q.dtype,
+            )
+
+        q0 = self._tensor(
+            self.demo_robot_qpos[frame_id],
+            delta_q.device,
+            delta_q.dtype,
+        )
+        q1 = self._tensor(
+            self.demo_robot_qpos[frame_id + 1],
+            delta_q.device,
+            delta_q.dtype,
+        )
+
+        demo_delta = q1 - q0
+
+        error = (delta_q - demo_delta.unsqueeze(0)).pow(2)
+
+        return torch.exp(
+            -self.beta_bc * error
+        ).mean(dim=-1)
+
+    def compute_contact_reward(
+        self,
+        current_contacts,
+        frame_id,
+    ):
+        """
+        Genesis parallel contact output:
+            position   : [N, C, 3]
+            valid_mask : [N, C]
+
+        Demo contacts:
+            [demo_contacts, 3]
+            validity:
+            [demo_contacts]
+        """
+
+        positions = current_contacts["position"]
+        valid = current_contacts["valid_mask"]
+
+        device = positions.device
+        dtype = positions.dtype
+
+        demo_positions = self._tensor(
+            self.demo_contact_tensor[frame_id],
+            device,
+            dtype,
+        ).squeeze(0)
+
+        demo_valid = self._tensor(
+            self.demo_contact_validity[frame_id],
+            device,
+        ).squeeze(0).bool()
+
+        demo_positions = demo_positions[demo_valid]
+
+        num_envs = positions.shape[0]
+
+        # No demonstrated contacts.
+        if demo_positions.numel() == 0:
+            has_contact = valid.any(dim=-1)
+
+            return torch.where(
+                has_contact,
+                torch.zeros(
+                    num_envs,
+                    device=device,
+                    dtype=dtype,
+                ),
+                torch.ones(
+                    num_envs,
+                    device=device,
+                    dtype=dtype,
+                ),
+            )
+
+        # [N, D, C, 3]
+        distances = torch.cdist(
+            demo_positions.unsqueeze(0),
+            positions,
+        )
+
+        # Invalid current contacts should never be selected.
+        distances = distances.masked_fill(
+            ~valid.unsqueeze(1),
+            float("inf"),
+        )
+
+        # [N, D]
+        min_distances = distances.min(dim=-1).values
+
+        has_current = valid.any(dim=-1)
+
         min_distances = torch.clamp(
             min_distances,
             max=self.contact_dmax,
         )
 
-        # ==================================================
-        # Contact reward
-        # ==================================================
+        reward = torch.exp(
+            -self.beta_contact * min_distances
+        ).mean(dim=-1)
 
-        reward = torch.exp(-self.beta_contact * min_distances)
-
-        return reward.mean()
-
-    def compute_task_reward(self, object_pos, object_quat, frame_id):
-        demo_object_pos = self.demo_object_trajectories[frame_id]
-        demo_object_quat = self.demo_object_quaternions[frame_id]
-        dpos = position_distance(object_pos, demo_object_pos)
-        drot = rotation_distance(object_quat, demo_object_quat)
-        object_ang = 2.0 * torch.acos(
-            torch.clamp(torch.abs(object_quat[..., 0]), max=1.0)
+        no_contact_reward = torch.exp(
+            torch.tensor(
+                -self.beta_contact * self.contact_dmax,
+                device=device,
+                dtype=dtype,
+            )
         )
 
-        demo_object_ang = 2.0 * torch.acos(
-            torch.clamp(torch.abs(demo_object_quat[..., 0]), max=1.0)
+        return torch.where(
+            has_current,
+            reward,
+            no_contact_reward.expand(num_envs),
         )
-
-        dang = torch.abs(object_ang - demo_object_ang)
-        return (
-            torch.exp(-self.beta_position * dpos)
-            * torch.exp(-self.beta_rotation * drot)
-            * torch.exp(-self.beta_angle * dang)
-        )
-
-    def compute_behaviour_cloning_reward(self, policy_action, frame_id):
-        dist_sq = (policy_action - self.demo_actions[frame_id]) ** 2
-
-        r_i = torch.exp(-self.beta_bc * dist_sq)
-
-        r_bc = r_i.mean()
-        return r_bc
 
     def compute_total_reward(
         self,
@@ -188,30 +253,35 @@ class RewardModule:
         current_contacts,
         object_pos,
         object_quat,
-        policy_action,
+        delta_q,
         frame_id,
+        target_frame,
     ):
-        z = torch.zeros_like(
-            task_reward := self.compute_task_reward(object_pos, object_quat, frame_id)
+        task = self.compute_task_reward(
+            object_pos,
+            object_quat,
+            target_frame,
         )
-        contact_reward = (
-            z
-            if self.compute_contact_reward(current_contacts, frame_id) is None
-            else self.compute_contact_reward(current_contacts, frame_id)
+
+        imitation = self.compute_motion_imitation_reward(
+            current_keypoints,
+            target_frame,
         )
-        imitation_reward = (
-            z
-            if self.compute_motion_imitation_reward(current_keypoints, frame_id) is None
-            else self.compute_motion_imitation_reward(current_keypoints, frame_id)
+
+        contact = self.compute_contact_reward(
+            current_contacts,
+            target_frame,
         )
-        behaviour_cloning_reward = (
-            z
-            if self.compute_behaviour_cloning_reward(policy_action, frame_id) is None
-            else self.compute_behaviour_cloning_reward(policy_action, frame_id)
+        contact_quality = contact.clone()
+
+        bc = self.compute_behaviour_cloning_reward(
+            delta_q,
+            frame_id,
         )
+
         return (
-            self.lambda_task * task_reward
-            + self.lambda_imitation * imitation_reward
-            + self.lambda_contact * contact_reward
-            + self.lambda_bc * behaviour_cloning_reward
-        )
+            self.lambda_task * task
+            + self.lambda_imitation * imitation
+            + self.lambda_contact * contact
+            + self.lambda_bc * bc
+        ), contact_quality
