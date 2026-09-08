@@ -316,7 +316,7 @@ def main() -> None:
         timeline_len = len(mano_vertices)
         qpos = None
     else:
-        qpos, _video_time, frame_ids = load_robot_qpos_on_video_timeline(ep.episode_root, ep.hand)
+        qpos, _video_time, frame_ids, hand_dof, arm_dof = load_robot_qpos_on_video_timeline(ep.episode_root, ep.hand)
         timeline_len = len(qpos)
     if timeline_len <= 0:
         raise ValueError(f"Empty trajectory: {ep.episode_root}")

@@ -5,8 +5,7 @@ from pathlib import Path
 
 import genesis as gs
 import numpy as np
-from src.utils.common import load_c2r, load_robot_qpos_on_video_timeline, resolve_episode 
-from scipy.spatial.transform import Rotation
+from src.utils.common import  resolve_episode
 
 
 
@@ -23,19 +22,6 @@ SCENE = "4"
 FPS = 30.0
 
 
-# ============================================================
-# CONTACT EXTRACTION
-# ============================================================
-
-def _to_numpy(x):
-    """Convert a Genesis tensor/array to a NumPy array."""
-    if hasattr(x, "detach"):
-        x = x.detach()
-    if hasattr(x, "cpu"):
-        x = x.cpu()
-    if hasattr(x, "numpy"):
-        return x.numpy()
-    return np.asarray(x)
 
 # ============================================================
 # CONTACT OPTIMIZATION
@@ -297,12 +283,6 @@ def main():
     output_dir = (
         ep.episode_root
         / "processed"
-    )
-    
-
-    output_dir.mkdir(
-        parents=True,
-        exist_ok=True,
     )
 
     contact_file = output_dir / "contact_tensor.npy"

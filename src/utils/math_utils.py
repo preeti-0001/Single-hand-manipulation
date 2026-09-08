@@ -1,5 +1,6 @@
 import torch
-
+from scipy.spatial.transform import Rotation
+import numpy as np 
 @torch.jit.script
 def quat_conjugate(q: torch.Tensor) -> torch.Tensor:
     """Computes the conjugate of a quaternion.
@@ -85,4 +86,31 @@ def matrix_from_quat(quaternions: torch.Tensor) -> torch.Tensor:
         -1,
     )
     return o.reshape(quaternions.shape[:-1] + (3, 3))
+
+# QUATERNION
+def matrix_to_wxyz(rotation_matrix):
+
+    quat_xyzw = Rotation.from_matrix(rotation_matrix).as_quat()
+
+    return np.array(
+        [
+            quat_xyzw[3],
+            quat_xyzw[0],
+            quat_xyzw[1],
+            quat_xyzw[2],
+        ],
+        dtype=float,
+    )
+
+
+# CONTACT EXTRACTION
+def _to_numpy(x):
+    """Convert a Genesis tensor/array to a NumPy array."""
+    if hasattr(x, "detach"):
+        x = x.detach()
+    if hasattr(x, "cpu"):
+        x = x.cpu()
+    if hasattr(x, "numpy"):
+        return x.numpy()
+    return np.asarray(x)
 

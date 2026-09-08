@@ -84,12 +84,6 @@ def resolve_episode(
             f"Scene directory not found: {episode_root}. "
             f"Expected layout: <dataset-root>/<hand>/<object>/<scene>."
         )
-    contact_root = dataset_root / hand_dir / object_name / scene_name / "processed"
-    if not contact_root.is_dir():
-        raise FileNotFoundError(
-            f"Scene directory not found: {contact_root}. "
-            f"Expected layout: <dataset-root>/<hand>/<object>/<scene>/<processed>."
-        )
 
     mesh_path = (
         Path(object_mesh).expanduser().resolve()
@@ -335,7 +329,64 @@ def load_object_poses_robot(episode_root: str | Path, target_len: int) -> Option
     return np.einsum("ij,tjk->tik", robot_from_world, poses_world)
 
 
-def load_robot_qpos(episode_root: str | Path, hand: str) -> Tuple[np.ndarray, np.ndarray]:
+def load_object_trajectory(
+    dataset_root: Path,
+    hand: str,
+    object_name: str,
+    scene: str,
+):
+    episode_root = (
+        dataset_root
+        / hand
+        / object_name
+        / scene
+    )
+
+    pose_file = episode_root / "object_6d_pose.npz"
+
+    if not pose_file.exists():
+        raise FileNotFoundError(
+            f"Object pose file not found:\n{pose_file}"
+        )
+
+    data = np.load(pose_file)
+
+
+    frame_keys = sorted(
+        data.files,
+        key=lambda x: int(x.split("_")[1]),
+    )
+
+    poses_world = np.asarray(
+        [data[key] for key in frame_keys],
+        dtype=float,
+    )
+
+    print("Raw poses:", poses_world.shape)
+
+    # ========================================================
+    # IMPORTANT:
+    # Convert HRDexDB world frame → robot frame
+    #
+    # ========================================================
+
+    c2r = load_c2r(episode_root)
+
+    robot_from_world = np.linalg.inv(c2r)
+
+    poses_robot = np.einsum(
+        "ij,tjk->tik",
+        robot_from_world,
+        poses_world,
+    )
+
+
+    return poses_robot
+
+
+
+
+def load_robot_qpos(episode_root: str | Path, hand: str) -> Tuple[np.ndarray, np.ndarray, int, int]:
     episode_root = Path(episode_root)
     arm_qpos, arm_time = load_series(
         episode_root / "raw" / "arm",
@@ -355,7 +406,7 @@ def load_robot_qpos(episode_root: str | Path, hand: str) -> Tuple[np.ndarray, np
 
     hand_qpos = resample_to(hand_time, hand_qpos, arm_time)
     n = min(len(arm_qpos), len(hand_qpos), len(arm_time))
-    return np.concatenate([arm_qpos[:n], hand_qpos[:n]], axis=1), arm_time[:n]
+    return np.concatenate([arm_qpos[:n], hand_qpos[:n]], axis=1), arm_time[:n], len(hand_qpos[0]), len(arm_qpos[0])
 
 
 def load_robot_actions(episode_root: str | Path, hand: str) -> Tuple[np.ndarray, np.ndarray]:
@@ -399,10 +450,10 @@ def load_robot_qpos_on_video_timeline(
     episode_root: str | Path,
     hand: str,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    full_qpos, robot_time = load_robot_qpos(episode_root, hand)
+    full_qpos, robot_time, hand_dof, arm_dof = load_robot_qpos(episode_root, hand)
     video_time, frame_ids = load_video_timeline(episode_root, len(full_qpos))
     qpos_video = resample_to(robot_time, full_qpos, video_time)
-    return qpos_video, video_time, frame_ids
+    return qpos_video, video_time, frame_ids, hand_dof, arm_dof
 
 
 def load_human_mano_sequence(episode_root: str | Path) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:

@@ -4,8 +4,14 @@ from src.utils.math_utils import quat_conjugate, quat_mul, matrix_from_quat
 
 @torch.jit.script
 def rotation_distance(object_rot, target_rot):
-    quat_diff = quat_mul(object_rot, quat_conjugate(target_rot))
-    return 2.0 * torch.asin(torch.clamp(torch.norm(quat_diff[:, 1:4], p=2, dim=-1), max=1.0))  # changed quat convention
+    
+    dot = torch.sum(object_rot * target_rot, dim=-1)
+
+    dot = torch.abs(dot)
+
+    dot = torch.clamp(dot, max=1.0)
+
+    return 2.0 * torch.acos(dot)# changed quat convention
 
 @torch.jit.script
 def position_distance(object_pos, target_pos): # (B, num_links, 3) -> (B, num_links)

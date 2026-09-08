@@ -5,13 +5,15 @@ from pathlib import Path
 
 import genesis as gs
 import numpy as np
-from scipy.spatial.transform import Rotation
 
 from src.utils.common import (
     resolve_episode,
     load_robot_qpos_on_video_timeline,
-    load_c2r,
+    load_human_mano_sequence,
+    load_object_trajectory
 )
+
+from src.utils.math_utils import matrix_to_wxyz
 
 
 # ============================================================
@@ -20,7 +22,7 @@ from src.utils.common import (
 
 DATASET_ROOT = Path("hrdexdb")
 
-HAND = "allegro_v5"
+HAND = "human"
 OBJECT_NAME = "apple"
 SCENE = "4"
 
@@ -30,100 +32,6 @@ FPS = 30.0
 # ============================================================
 # LOAD OBJECT NPZ
 # ============================================================
-
-def load_object_trajectory(
-    dataset_root: Path,
-    hand: str,
-    object_name: str,
-    scene: str,
-):
-    episode_root = (
-        dataset_root
-        / hand
-        / object_name
-        / scene
-    )
-
-    pose_file = episode_root / "object_6d_pose.npz"
-
-    if not pose_file.exists():
-        raise FileNotFoundError(
-            f"Object pose file not found:\n{pose_file}"
-        )
-
-    data = np.load(pose_file)
-
-    print("\n========== OBJECT DATA ==========")
-    print("Pose file:", pose_file)
-    print("Keys:", data.files)
-
-    frame_keys = sorted(
-        data.files,
-        key=lambda x: int(x.split("_")[1]),
-    )
-
-    poses_world = np.asarray(
-        [data[key] for key in frame_keys],
-        dtype=float,
-    )
-
-    print("Raw poses:", poses_world.shape)
-
-    # ========================================================
-    # IMPORTANT:
-    # Convert HRDexDB world frame → robot frame
-    #
-    # This is the SAME transformation used by common.py
-    # ========================================================
-
-    c2r = load_c2r(episode_root)
-
-    robot_from_world = np.linalg.inv(c2r)
-
-    poses_robot = np.einsum(
-        "ij,tjk->tik",
-        robot_from_world,
-        poses_world,
-    )
-
-    print("C2R:")
-    print(c2r)
-
-    print("\nRobot-from-world:")
-    print(robot_from_world)
-
-    print("\nFirst raw pose:")
-    print(poses_world[0])
-
-    print("\nFirst robot-frame pose:")
-    print(poses_robot[0])
-
-    print("\nLast robot-frame pose:")
-    print(poses_robot[-1])
-
-    print("=================================\n")
-
-    return poses_robot
-# ============================================================
-# QUATERNION
-# ============================================================
-
-def matrix_to_wxyz(rotation_matrix):
-
-    quat_xyzw = Rotation.from_matrix(
-        rotation_matrix
-    ).as_quat()
-
-    return np.array(
-        [
-            quat_xyzw[3],
-            quat_xyzw[0],
-            quat_xyzw[1],
-            quat_xyzw[2],
-        ],
-        dtype=float,
-    )
-
 
 # ============================================================
 # MAIN
@@ -156,13 +64,17 @@ def main():
     #
     # EXACTLY from common.py
     # ========================================================
-
-    qpos, video_time, frame_ids = (
-        load_robot_qpos_on_video_timeline(
-            ep.episode_root,
-            ep.hand,
-        )
-    )
+    
+    if ep.hand == "human":
+        mano_vertices, mano_faces, frame_ids, video_time = load_human_mano_sequence(ep.episode_root)
+        timeline_len = len(mano_vertices)
+        qpos = None
+    else:
+        qpos, video_time, frame_ids, hand_dof, arm_dof = load_robot_qpos_on_video_timeline(ep.episode_root, ep.hand)
+        timeline_len = len(qpos)
+    
+    if timeline_len <= 0:
+        raise ValueError(f"Empty trajectory: {ep.episode_root}")
 
     print("Robot qpos shape :", qpos.shape)
     print("Video time shape :", video_time.shape)

@@ -9,3 +9,7 @@ ffmpeg
 matplotlib
 genesis-world
 torch
+gymnasium
+stable-baselines3
+swig
+"gymnasium[box2d]"

@@ -72,3 +72,5 @@ python -m src.inspect.dataset --hand allegro_v5 --object_name apple --scene 4 --
 ```
 6.
 python -m train 
+7.
+python -m genesis_env.envs.genesis --hand allegro_v5 --object_name apple --scene 4 

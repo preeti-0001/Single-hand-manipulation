@@ -5,13 +5,12 @@ from pathlib import Path
 import numpy as np
 import torch
 import genesis as gs
-from scipy.spatial.transform import Rotation
+from src.utils.math_utils import matrix_to_wxyz
 
 from src.utils.common import (
     resolve_episode,
     load_robot_qpos_on_video_timeline,
-    load_c2r,
-    resample_to,
+    load_object_trajectory,
     load_robot_actions
 )
 
@@ -50,75 +49,6 @@ DEVICE = torch.device(
 )
 
 
-# ============================================================
-# OBJECT TRAJECTORY
-# ============================================================
-
-def load_object_trajectory(
-    dataset_root: Path,
-    hand: str,
-    object_name: str,
-    scene: str,
-):
-    episode_root = (
-        dataset_root
-        / hand
-        / object_name
-        / scene
-    )
-
-    pose_file = episode_root / "object_6d_pose.npz"
-
-    if not pose_file.exists():
-        raise FileNotFoundError(
-            f"Object pose file not found:\n{pose_file}"
-        )
-
-    data = np.load(pose_file)
-
-    frame_keys = sorted(
-        data.files,
-        key=lambda x: int(x.split("_")[1]),
-    )
-
-    poses_world = np.asarray(
-        [data[key] for key in frame_keys],
-        dtype=float,
-    )
-
-    # Same transformation used in genesis_viewer.py.
-    c2r = load_c2r(episode_root)
-
-    robot_from_world = np.linalg.inv(c2r)
-
-    poses_robot = np.einsum(
-        "ij,tjk->tik",
-        robot_from_world,
-        poses_world,
-    )
-
-    return poses_robot
-
-
-# ============================================================
-# QUATERNION
-# ============================================================
-
-def matrix_to_wxyz(rotation_matrix):
-
-    quat_xyzw = Rotation.from_matrix(
-        rotation_matrix
-    ).as_quat()
-
-    return np.array(
-        [
-            quat_xyzw[3],
-            quat_xyzw[0],
-            quat_xyzw[1],
-            quat_xyzw[2],
-        ],
-        dtype=float,
-    )
 
 
 # ============================================================
@@ -295,7 +225,7 @@ def main():
     # Robot demonstration
     # ========================================================
 
-    demo_qpos, video_time, frame_ids = (
+    demo_qpos, video_time, frame_ids, hand_dof, arm_dof = (
         load_robot_qpos_on_video_timeline(
             ep.episode_root,
             ep.hand,

@@ -28,6 +28,9 @@ def inspect(name, path, allow_pickle=False):
                 print("  shape :", arr.shape)
                 print("  dtype :", arr.dtype)
 
+                print("  min   :", arr.min())
+                print("  max   :", arr.max())
+
                 if arr.ndim > 0:
                     print("  first :", arr[0])
                     print("  last  :", arr[-1])
@@ -40,6 +43,8 @@ def inspect(name, path, allow_pickle=False):
             print("type  :", "NPY")
             print("shape :", x.shape)
             print("dtype :", x.dtype)
+            print("min   :", x.min())
+            print("max   :", x.max())
 
             if x.ndim > 0:
                 print("first :", x[0])
