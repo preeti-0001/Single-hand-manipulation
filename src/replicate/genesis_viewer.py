@@ -10,12 +10,11 @@ from src.utils.common import (
     resolve_episode,
     load_robot_qpos_on_video_timeline,
     load_human_mano_sequence,
-    load_object_trajectory
+    load_object_trajectory,
 )
 
 from src.utils.math_utils import matrix_to_wxyz
 import argparse
-
 
 # ============================================================
 # CONFIG
@@ -29,6 +28,7 @@ FPS = 30.0
 # ============================================================
 # LOAD OBJECT NPZ
 # ============================================================
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -58,16 +58,18 @@ def parse_args():
 
     return parser.parse_args()
 
+
 # ============================================================
 # MAIN
 # ============================================================
+
 
 def main():
 
     # ========================================================
     # Resolve HRDexDB episode
     # ========================================================
-    
+
     args = parse_args()
 
     HAND = args.hand
@@ -89,28 +91,30 @@ def main():
     print("Object mesh  :", ep.object_mesh)
     print("=====================================\n")
 
-
     # ========================================================
     # Robot trajectory
     #
     # EXACTLY from common.py
     # ========================================================
-    
+
     if ep.hand == "human":
-        mano_vertices, mano_faces, frame_ids, video_time = load_human_mano_sequence(ep.episode_root)
+        mano_vertices, mano_faces, frame_ids, video_time = load_human_mano_sequence(
+            ep.episode_root
+        )
         timeline_len = len(mano_vertices)
         qpos = None
     else:
-        qpos, video_time, frame_ids, hand_dof, arm_dof = load_robot_qpos_on_video_timeline(ep.episode_root, ep.hand)
+        qpos, video_time, frame_ids, hand_dof, arm_dof = (
+            load_robot_qpos_on_video_timeline(ep.episode_root, ep.hand)
+        )
         timeline_len = len(qpos)
-    
+
     if timeline_len <= 0:
         raise ValueError(f"Empty trajectory: {ep.episode_root}")
 
     print("Robot qpos shape :", qpos.shape)
     print("Video time shape :", video_time.shape)
     print("Frame IDs shape  :", frame_ids.shape)
-
 
     # ========================================================
     # Object trajectory
@@ -124,7 +128,6 @@ def main():
         OBJECT_NAME,
         SCENE,
     )
-
 
     # ========================================================
     # Determine replay length
@@ -144,23 +147,18 @@ def main():
     print("Replay frames :", timeline_len)
     print("============================\n")
 
-
     # ========================================================
     # Genesis
     # ========================================================
 
-    gs.init(
-        backend=gs.gpu
-    )
+    gs.init(backend=gs.gpu)
 
     scene = gs.Scene(
         show_viewer=True,
-
         sim_options=gs.options.SimOptions(
             dt=1.0 / FPS,
             gravity=(0.0, 0.0, -9.81),
         ),
-
         viewer_options=gs.options.ViewerOptions(
             camera_pos=(0.7, 0.7, 0.45),
             camera_lookat=(0.0, 0.0, 0.15),
@@ -169,15 +167,11 @@ def main():
         ),
     )
 
-
     # ========================================================
     # Ground
     # ========================================================
 
-    plane = scene.add_entity(
-        gs.morphs.Plane()
-    )
-
+    plane = scene.add_entity(gs.morphs.Plane())
 
     # ========================================================
     # Robot
@@ -186,16 +180,12 @@ def main():
     robot = scene.add_entity(
         gs.morphs.URDF(
             file=str(ep.robot_urdf),
-
             pos=(0.0, 0.0, 0.0),
-
             fixed=True,
-
             # Required for your current URDF.
             recompute_inertia=True,
         )
     )
-
 
     # ========================================================
     # Object
@@ -205,25 +195,18 @@ def main():
 
     first_position = first_pose[:3, 3]
 
-    first_quat = matrix_to_wxyz(
-        first_pose[:3, :3]
-    )
+    first_quat = matrix_to_wxyz(first_pose[:3, :3])
 
     obj = scene.add_entity(
         gs.morphs.Mesh(
             file=str(ep.object_mesh),
-
             pos=first_position,
-
             quat=first_quat,
-
             scale=1.0,
-
             # Kinematic replay.
             fixed=True,
         )
     )
-
 
     # ========================================================
     # Build
@@ -231,7 +214,47 @@ def main():
 
     scene.build()
 
+    print(type(obj))
 
+    print([x for x in dir(obj) if "force" in x.lower()])
+    print([x for x in dir(obj) if "wrench" in x.lower()])
+    print([x for x in dir(obj) if "torque" in x.lower()])
+    print("RigidEntity:")
+    print([x for x in dir(obj) if "set_" in x.lower()])
+    print("Object attributes:")
+    print(
+        [
+            x
+            for x in dir(obj)
+            if any(
+                k in x.lower()
+                for k in [
+                    "force",
+                    "torque",
+                    "wrench",
+                    "joint",
+                    "link",
+                    "solver",
+                ]
+            )
+        ]
+    )
+    print("Scene attributes:")
+    print(
+        [
+            x
+            for x in dir(scene)
+            if any(
+                k in x.lower()
+                for k in [
+                    "force",
+                    "wrench",
+                    "solver",
+                ]
+            )
+        ]
+    )
+    breakpoint()
     # ========================================================
     # Robot DOF check
     # ========================================================
@@ -242,7 +265,6 @@ def main():
     print("HRDexDB qpos size :", qpos.shape[1])
     print("===========================\n")
 
-
     if robot.n_qs != qpos.shape[1]:
 
         raise RuntimeError(
@@ -250,7 +272,6 @@ def main():
             f"Genesis robot qpos : {robot.n_qs}\n"
             f"HRDexDB trajectory : {qpos.shape[1]}"
         )
-
 
     # ========================================================
     # Print joints
@@ -260,28 +281,19 @@ def main():
 
     for i, joint in enumerate(robot.joints):
 
-        print(
-            f"{i:02d} | {joint.name}"
-        )
-
+        print(f"{i:02d} | {joint.name}")
 
     # ========================================================
     # Replay
     # ========================================================
 
-    print(
-        f"\nStarting replay "
-        f"({timeline_len} frames @ {FPS} FPS)\n"
-    )
-
+    print(f"\nStarting replay " f"({timeline_len} frames @ {FPS} FPS)\n")
 
     frame_dt = 1.0 / FPS
-
 
     for frame in range(timeline_len):
 
         start_time = time.perf_counter()
-
 
         # ====================================================
         # ROBOT
@@ -292,7 +304,6 @@ def main():
             zero_velocity=True,
         )
 
-
         # ====================================================
         # OBJECT
         #
@@ -302,13 +313,11 @@ def main():
 
         T = object_poses[frame]
 
-
         # ----------------------------------------------------
         # Position
         # ----------------------------------------------------
 
         position = T[:3, 3]
-
 
         # ----------------------------------------------------
         # Rotation
@@ -316,10 +325,7 @@ def main():
 
         rotation_matrix = T[:3, :3]
 
-        quat_wxyz = matrix_to_wxyz(
-            rotation_matrix
-        )
-
+        quat_wxyz = matrix_to_wxyz(rotation_matrix)
 
         # ----------------------------------------------------
         # Move object
@@ -335,28 +341,22 @@ def main():
             zero_velocity=True,
         )
 
-
         # ====================================================
         # Advance Genesis
         # ====================================================
 
         scene.step()
 
-
         # ====================================================
         # Real-time playback
         # ====================================================
 
-        elapsed = (
-            time.perf_counter()
-            - start_time
-        )
+        elapsed = time.perf_counter() - start_time
 
         remaining = frame_dt - elapsed
 
         if remaining > 0:
             time.sleep(remaining)
-
 
         # ====================================================
         # Debug
@@ -367,7 +367,6 @@ def main():
             f"Object pos = {position} | "
             f"Robot qpos = {qpos[frame]}"
         )
-
 
     print("\nReplay finished.")
 

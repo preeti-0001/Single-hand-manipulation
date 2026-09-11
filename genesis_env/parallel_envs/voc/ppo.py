@@ -9,7 +9,6 @@ from .rewards import RewardModule
 
 from datetime import datetime
 
-
 CHECKPOINT_DIR = Path("logs/checkpoints")
 CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -37,12 +36,8 @@ def _make_state(
 
 def _quaternion_error_wxyz(target_quat, current_quat):
     """Shortest-arc quaternion error as a 3D axis-angle-like vector."""
-    target_quat = target_quat / (
-        target_quat.norm(dim=-1, keepdim=True) + 1e-8
-    )
-    current_quat = current_quat / (
-        current_quat.norm(dim=-1, keepdim=True) + 1e-8
-    )
+    target_quat = target_quat / (target_quat.norm(dim=-1, keepdim=True) + 1e-8)
+    current_quat = current_quat / (current_quat.norm(dim=-1, keepdim=True) + 1e-8)
 
     tw, tx, ty, tz = target_quat.unbind(dim=-1)
     cw, cx, cy, cz = current_quat.unbind(dim=-1)
@@ -83,10 +78,7 @@ def _apply_virtual_object_controller(
     pos_error = target_pos - current_pos
     vel_error = target_lin_vel - current_lin_vel
 
-    force = (
-        kp_pos * pos_error
-        + kv_pos * vel_error
-    )
+    force = kp_pos * pos_error + kv_pos * vel_error
 
     rot_error = _quaternion_error_wxyz(
         target_quat,
@@ -94,14 +86,9 @@ def _apply_virtual_object_controller(
     )
 
     # For a rigid object, angular velocity is available from the root link.
-    current_ang_vel = obj.get_links_ang(
-        links_idx_local=[0]
-    )[:, 0, :]
+    current_ang_vel = obj.get_links_ang(links_idx_local=[0])[:, 0, :]
 
-    torque = (
-        kp_rot * rot_error
-        - kv_rot * current_ang_vel
-    )
+    torque = kp_rot * rot_error - kv_rot * current_ang_vel
 
     force_norm = force.norm(dim=-1, keepdim=True).clamp_min(1e-8)
     torque_norm = torque.norm(dim=-1, keepdim=True).clamp_min(1e-8)
@@ -131,14 +118,14 @@ def _apply_virtual_object_controller(
     obj_link_idx = obj.base_link.idx
 
     rigid_solver.apply_links_external_force(
-    force=force.unsqueeze(1),
-    links_idx=[obj_link_idx],
-)
+        force=force.unsqueeze(1),
+        links_idx=[obj_link_idx],
+    )
 
     rigid_solver.apply_links_external_torque(
-    torque=torque.unsqueeze(1),
-    links_idx=[obj_link_idx],
-)
+        torque=torque.unsqueeze(1),
+        links_idx=[obj_link_idx],
+    )
 
 
 def train_one_episode(
@@ -193,14 +180,16 @@ def train_one_episode(
     )
 
     obj.set_pos(
-        demo_object_positions[0].to(device=device, dtype=dtype)
+        demo_object_positions[0]
+        .to(device=device, dtype=dtype)
         .unsqueeze(0)
         .expand(num_envs, -1),
         zero_velocity=True,
     )
 
     obj.set_quat(
-        demo_object_quaternions[0].to(device=device, dtype=dtype)
+        demo_object_quaternions[0]
+        .to(device=device, dtype=dtype)
         .unsqueeze(0)
         .expand(num_envs, -1),
         zero_velocity=True,
@@ -228,15 +217,15 @@ def train_one_episode(
     if voc_contact_ema is None:
         voc_contact_ema = torch.zeros_like(voc_strength)
 
+    contact_reward = torch.zeros_like(voc_strength)
+
     for frame in range(timeline_len - 1):
 
         # ========================================================
         # CURRENT STATE
         # ========================================================
 
-        robot_qpos = robot.get_qpos(
-            qs_idx_local=motors_dof_idx
-        )
+        robot_qpos = robot.get_qpos(qs_idx_local=motors_dof_idx)
 
         object_pos = obj.get_pos()
         object_quat = obj.get_quat()
@@ -251,35 +240,21 @@ def train_one_episode(
 
         target_frame = frame + 1
 
-        target_robot_qpos = demo_robot_qpos[
-            target_frame
-        ].to(device=device, dtype=dtype)
+        target_robot_qpos = demo_robot_qpos[target_frame].to(device=device, dtype=dtype)
 
-        target_object_pos = demo_object_positions[
-            target_frame
-        ].to(device=device, dtype=dtype)
-
-        target_object_quat = demo_object_quaternions[
-            target_frame
-        ].to(device=device, dtype=dtype)
-
-        target_robot_qpos_batch = (
-            target_robot_qpos
-            .unsqueeze(0)
-            .expand(num_envs, -1)
+        target_object_pos = demo_object_positions[target_frame].to(
+            device=device, dtype=dtype
         )
 
-        target_object_pos_batch = (
-            target_object_pos
-            .unsqueeze(0)
-            .expand(num_envs, -1)
+        target_object_quat = demo_object_quaternions[target_frame].to(
+            device=device, dtype=dtype
         )
 
-        target_object_quat_batch = (
-            target_object_quat
-            .unsqueeze(0)
-            .expand(num_envs, -1)
-        )
+        target_robot_qpos_batch = target_robot_qpos.unsqueeze(0).expand(num_envs, -1)
+
+        target_object_pos_batch = target_object_pos.unsqueeze(0).expand(num_envs, -1)
+
+        target_object_quat_batch = target_object_quat.unsqueeze(0).expand(num_envs, -1)
 
         state = _make_state(
             robot_qpos,
@@ -305,19 +280,13 @@ def train_one_episode(
 
         raw_action = policy_dist.sample()
 
-        old_log_prob = (
-            policy_dist
-            .log_prob(raw_action)
-            .sum(dim=-1)
-        )
+        old_log_prob = policy_dist.log_prob(raw_action).sum(dim=-1)
 
         # ========================================================
         # ACTION = DELTA Q
         # ========================================================
 
-        delta_q = (
-            action_scale * raw_action
-        )
+        delta_q = action_scale * raw_action
 
         target_qpos = robot_qpos + delta_q
 
@@ -351,18 +320,14 @@ def train_one_episode(
         # reduced as the policy produces better contact.
         # ========================================================
 
-        object_lin_vel = obj.get_links_vel(
-            links_idx_local=[0]
-        )[:, 0, :]
+        object_lin_vel = obj.get_links_vel(links_idx_local=[0])[:, 0, :]
 
         target_object_lin_vel = (
-            demo_object_positions[target_frame]
-            - demo_object_positions[frame]
+            demo_object_positions[target_frame] - demo_object_positions[frame]
         ) / (1.0 / 30.0)
 
         target_object_lin_vel = (
-            target_object_lin_vel
-            .to(device=device, dtype=dtype)
+            target_object_lin_vel.to(device=device, dtype=dtype)
             .unsqueeze(0)
             .expand(num_envs, -1)
         )
@@ -414,38 +379,9 @@ def train_one_episode(
         )
 
         reward = reward_terms["total"]
-        contact_reward = reward_terms["contact"]
+        contact_reward += reward_terms["contact"]
 
         total_reward += reward
-
-        # --------------------------------------------------------
-        # VOC curriculum update
-        #
-        # Contact reward is approximately [0, 1]. We only decay
-        # after contact quality passes a useful threshold, so
-        # accidental/no-contact states do not remove assistance.
-        # --------------------------------------------------------
-
-        voc_contact_ema = (
-            0.9 * voc_contact_ema
-            + 0.1 * contact_reward.detach()
-        )
-
-        contact_progress = (
-            (voc_contact_ema - voc_contact_threshold)
-            / max(1.0 - voc_contact_threshold, 1e-6)
-        ).clamp(0.0, 1.0)
-
-        voc_strength = torch.maximum(
-            torch.full_like(
-                voc_strength,
-                voc_min_strength,
-            ),
-            voc_strength
-            * torch.exp(
-                -voc_decay_rate * contact_progress
-            ),
-        )
 
         # ========================================================
         # CRITIC
@@ -472,13 +408,35 @@ def train_one_episode(
         log_probs.append(old_log_prob.detach())
         values.append(value.detach())
 
+    # --------------------------------------------------------
+    # VOC curriculum update
+    #
+    # Contact reward is approximately [0, 1]. We only decay
+    # after contact quality passes a useful threshold, so
+    # accidental/no-contact states do not remove assistance.
+    # --------------------------------------------------------
+    contact_quality = contact_reward / (timeline_len - 1)
+    voc_contact_ema = 0.9 * voc_contact_ema + 0.1 * contact_quality.detach()
+
+    contact_progress = (
+        (voc_contact_ema - voc_contact_threshold)
+        / max(1.0 - voc_contact_threshold, 1e-6)
+    ).clamp(0.0, 1.0)
+
+    voc_strength = torch.maximum(
+        torch.full_like(
+            voc_strength,
+            voc_min_strength,
+        ),
+        voc_strength * torch.exp(-voc_decay_rate * contact_progress),
+    )
     return {
-        "states": torch.stack(states),        # [T,N,S]
-        "actions": torch.stack(actions),      # [T,N,D]
-        "rewards": torch.stack(rewards),      # [T,N]
+        "states": torch.stack(states),  # [T,N,S]
+        "actions": torch.stack(actions),  # [T,N,D]
+        "rewards": torch.stack(rewards),  # [T,N]
         "old_log_probs": torch.stack(log_probs),  # [T,N]
-        "values": torch.stack(values),        # [T,N]
-        "total_reward": total_reward,         # [N]
+        "values": torch.stack(values),  # [T,N]
+        "total_reward": total_reward,  # [N]
         "voc_strength": voc_strength.detach(),
         "voc_contact_ema": voc_contact_ema.detach(),
     }
@@ -499,43 +457,26 @@ def compute_gae(
 
     T = rewards.shape[0]
 
-    advantages = torch.zeros_like(
-        rewards
-    )
+    advantages = torch.zeros_like(rewards)
 
-    gae = torch.zeros_like(
-        rewards[0]
-    )
+    gae = torch.zeros_like(rewards[0])
 
     for t in reversed(range(T)):
 
         if t == T - 1:
-            next_value = torch.zeros_like(
-                values[t]
-            )
+            next_value = torch.zeros_like(values[t])
         else:
             next_value = values[t + 1]
 
-        delta = (
-            rewards[t]
-            + gamma * next_value
-            - values[t]
-        )
+        delta = rewards[t] + gamma * next_value - values[t]
 
-        gae = (
-            delta
-            + gamma
-            * gae_lambda
-            * gae
-        )
+        gae = delta + gamma * gae_lambda * gae
 
         advantages[t] = gae
 
     returns = advantages + values
 
-    advantages = (
-        advantages - advantages.mean()
-    ) / (
+    advantages = (advantages - advantages.mean()) / (
         advantages.std(unbiased=False) + 1e-8
     )
 
@@ -573,28 +514,22 @@ def ppo_update(
         action_dim,
     )
 
-    old_log_probs = old_log_probs.reshape(
-        T * N
-    )
+    old_log_probs = old_log_probs.reshape(T * N)
 
-    advantages = advantages.reshape(
-        T * N
-    ).detach()
+    advantages = advantages.reshape(T * N).detach()
 
-    returns = returns.reshape(
-        T * N
-    ).detach()
+    returns = returns.reshape(T * N).detach()
 
     # Actor stores robot_dof.
     D = actor.robot_dof
 
     robot_qpos = states[:, :D]
-    object_pos = states[:, D:D + 3]
-    object_quat = states[:, D + 3:D + 7]
+    object_pos = states[:, D : D + 3]
+    object_quat = states[:, D + 3 : D + 7]
 
-    target_robot_qpos = states[:, D + 7:D + 7 + D]
-    target_object_pos = states[:, D + 7 + D:D + 10 + D]
-    target_object_quat = states[:, D + 10 + D:D + 14 + D]
+    target_robot_qpos = states[:, D + 7 : D + 7 + D]
+    target_object_pos = states[:, D + 7 + D : D + 10 + D]
+    target_object_quat = states[:, D + 10 + D : D + 14 + D]
 
     total_samples = states.shape[0]
 
@@ -614,9 +549,7 @@ def ppo_update(
             total_samples,
             minibatch_size,
         ):
-            idx = permutation[
-                start:start + minibatch_size
-            ]
+            idx = permutation[start : start + minibatch_size]
 
             dist = actor(
                 robot_qpos[idx],
@@ -627,26 +560,13 @@ def ppo_update(
                 target_object_quat[idx],
             )
 
-            new_log_probs = (
-                dist.log_prob(
-                    actions[idx]
-                ).sum(dim=-1)
-            )
+            new_log_probs = dist.log_prob(actions[idx]).sum(dim=-1)
 
-            entropy = (
-                dist.entropy()
-                .sum(dim=-1)
-                .mean()
-            )
+            entropy = dist.entropy().sum(dim=-1).mean()
 
-            ratio = torch.exp(
-                new_log_probs
-                - old_log_probs[idx]
-            )
+            ratio = torch.exp(new_log_probs - old_log_probs[idx])
 
-            unclipped = (
-                ratio * advantages[idx]
-            )
+            unclipped = ratio * advantages[idx]
 
             clipped = (
                 torch.clamp(
@@ -662,14 +582,9 @@ def ppo_update(
                 clipped,
             ).mean()
 
-            actor_loss = (
-                policy_loss
-                - entropy_coef * entropy
-            )
+            actor_loss = policy_loss - entropy_coef * entropy
 
-            actor_optimizer.zero_grad(
-                set_to_none=True
-            )
+            actor_optimizer.zero_grad(set_to_none=True)
 
             actor_loss.backward()
 
@@ -693,17 +608,11 @@ def ppo_update(
                 target_object_quat[idx],
             )
 
-            critic_loss = (
-                returns[idx] - predicted_value
-            ).pow(2).mean()
+            critic_loss = (returns[idx] - predicted_value).pow(2).mean()
 
-            critic_loss = (
-                value_coef * critic_loss
-            )
+            critic_loss = value_coef * critic_loss
 
-            critic_optimizer.zero_grad(
-                set_to_none=True
-            )
+            critic_optimizer.zero_grad(set_to_none=True)
 
             critic_loss.backward()
 
@@ -752,13 +661,9 @@ def train_parallel_episode(
         lr=1e-3,
     )
 
-    robot_q_min = robot.get_dofs_limit(
-        dofs_idx_local=motors_dof_idx
-    )[0].to(device)
+    robot_q_min = robot.get_dofs_limit(dofs_idx_local=motors_dof_idx)[0].to(device)
 
-    robot_q_max = robot.get_dofs_limit(
-        dofs_idx_local=motors_dof_idx
-    )[1].to(device)
+    robot_q_max = robot.get_dofs_limit(dofs_idx_local=motors_dof_idx)[1].to(device)
 
     # Fallback if Genesis returns limits as a tuple/list.
     if robot_q_min.ndim == 0:
@@ -785,6 +690,8 @@ def train_parallel_episode(
     voc_contact_ema = torch.zeros_like(voc_strength)
 
     best_reward = -float("inf")
+
+    date = datetime.now().strftime("%Y_%m_%d_%H_%M")
 
     for episode in range(num_episodes):
 
@@ -828,18 +735,14 @@ def train_parallel_episode(
         episode_rewards = rollout["total_reward"]
 
         mean_reward = episode_rewards.mean()
-        best_episode_reward, best_env = (
-            episode_rewards.max(dim=0)
-        )
+        best_episode_reward, best_env = episode_rewards.max(dim=0)
 
         if best_episode_reward.item() > best_reward:
 
             best_reward = best_episode_reward.item()
 
             # Save the actual best candidate trajectory.
-            best_actions = rollout["actions"][
-                :, best_env
-            ].detach().cpu()
+            best_actions = rollout["actions"][:, best_env].detach().cpu()
 
             torch.save(
                 {
@@ -856,12 +759,10 @@ def train_parallel_episode(
                     },
                     "actor_state_dict": actor.state_dict(),
                     "critic_state_dict": critic.state_dict(),
-                    "actor_optimizer_state_dict":
-                        actor_optimizer.state_dict(),
-                    "critic_optimizer_state_dict":
-                        critic_optimizer.state_dict(),
+                    "actor_optimizer_state_dict": actor_optimizer.state_dict(),
+                    "critic_optimizer_state_dict": critic_optimizer.state_dict(),
                 },
-                CHECKPOINT_DIR / f"best_ppo_{datetime.now()}.pt",
+                CHECKPOINT_DIR / f"best_ppo_voc_{date}.pt",
             )
 
         print(

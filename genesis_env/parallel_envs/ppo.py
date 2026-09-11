@@ -7,6 +7,8 @@ import torch
 from .actor_critic import Actor, Critic
 from .rewards import RewardModule
 
+from datetime import datetime
+
 CHECKPOINT_DIR = Path("logs/checkpoints")
 CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -507,6 +509,8 @@ def train_parallel_episode(
         )
 
     best_reward = -float("inf")
+    
+    date = datetime.now().strftime("%Y_%m_%d_%H_%M")
 
     for episode in range(num_episodes):
 
@@ -565,7 +569,7 @@ def train_parallel_episode(
                     "actor_optimizer_state_dict": actor_optimizer.state_dict(),
                     "critic_optimizer_state_dict": critic_optimizer.state_dict(),
                 },
-                CHECKPOINT_DIR / "best_ppo.pt",
+                CHECKPOINT_DIR / f"best_ppo_{date}.pt",
             )
 
         print(
