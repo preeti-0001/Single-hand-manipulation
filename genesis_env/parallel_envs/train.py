@@ -16,7 +16,8 @@ from src.utils.common import (
 from src.utils.math_utils import matrix_to_wxyz
 
 from .actor_critic import Actor, Critic
-from .ppo import train_parallel_episode
+from .ppo import train_parallel_episode as train_parallel_episode_without_voc
+from .voc.ppo import train_parallel_episode as train_parallel_episode_with_voc
 from .rewards import RewardModule
 
 
@@ -65,6 +66,12 @@ def parse_args():
         type=float,
         default=0.1,
         help="Maximum approximate joint delta in radians per policy step.",
+    )
+
+    parser.add_argument(
+        "--without_voc",
+        action="store_true",
+        help="Disable the virtual object controller.",
     )
 
     return parser.parse_args()
@@ -368,6 +375,10 @@ def main():
     print(
         "\n========== PPO TRAINING =========="
     )
+    if (args.without_voc):
+        train_parallel_episode = train_parallel_episode_without_voc
+    else:
+        train_parallel_episode = train_parallel_episode_with_voc
 
     train_parallel_episode(
         reward_module=reward_module,

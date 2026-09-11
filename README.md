@@ -100,7 +100,7 @@ python -m src.inspect.dataset --hand allegro_v5 --object_name apple --scene 4 --
 6. Train the simple PPO algorithm
 
 ```
-python -m genesis_env.parallel_envs.train --hand allegro_v5 --object_name apple --scene 4 > "logs/output_ppo_2026-09-0.txt"
+python -m genesis_env.parallel_envs.train --without_voc --hand allegro_v5 --object_name apple --scene 4 > "logs/output_ppo_2026-09-0.txt"
 ```
 
 7. Evaluate the simple PPO algorithm
@@ -117,7 +117,7 @@ python -m genesis_env.parallel_envs.evaluate \
 
 ```
 
-python -m genesis_env.parallel_envs.voc.train --hand allegro_v5 --object_name apple --scene 4 > "logs/output_ppo_voc_2026-09-0.txt"
+python -m genesis_env.parallel_envs.train --hand allegro_v5 --object_name apple --scene 4 > "logs/output_ppo_voc_2026-09-0.txt"
 ```
 
 9. Evaluate the simple PPO with VOC algorithm

@@ -257,6 +257,7 @@ class RewardModule:
         frame_id,
         target_frame,
     ):
+        """Return individual reward terms before weighting."""
         task = self.compute_task_reward(
             object_pos,
             object_quat,
@@ -272,16 +273,43 @@ class RewardModule:
             current_contacts,
             target_frame,
         )
-        contact_quality = contact.clone()
 
         bc = self.compute_behaviour_cloning_reward(
             delta_q,
             frame_id,
         )
 
-        return (
+        total = (
             self.lambda_task * task
             + self.lambda_imitation * imitation
             + self.lambda_contact * contact
             + self.lambda_bc * bc
-        ), contact_quality
+        )
+
+        return {
+            "task": task,
+            "imitation": imitation,
+            "contact": contact,
+            "bc": bc,
+            "total": total,
+        }
+
+    def compute_total_reward(
+        self,
+        current_keypoints,
+        current_contacts,
+        object_pos,
+        object_quat,
+        delta_q,
+        frame_id,
+        target_frame,
+    ):
+        return self.compute_reward_terms(
+            current_keypoints=current_keypoints,
+            current_contacts=current_contacts,
+            object_pos=object_pos,
+            object_quat=object_quat,
+            delta_q=delta_q,
+            frame_id=frame_id,
+            target_frame=target_frame,
+        )["total"]

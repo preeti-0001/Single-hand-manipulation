@@ -4,8 +4,8 @@ from pathlib import Path
 
 import torch
 
-from .actor_critic import Actor, Critic
-from .rewards import RewardModule
+from genesis_env.parallel_envs.actor_critic import Actor, Critic
+from genesis_env.parallel_envs.rewards import RewardModule
 
 from datetime import datetime
 

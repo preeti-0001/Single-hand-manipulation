@@ -15,9 +15,8 @@ from src.utils.common import (
 )
 from src.utils.math_utils import matrix_to_wxyz
 
-from .actor_critic import Actor
+from genesis_env.parallel_envs.actor_critic import Actor
 from .ppo import _apply_virtual_object_controller
-from .rewards import RewardModule
 
 
 DATASET_ROOT = Path("hrdexdb")
