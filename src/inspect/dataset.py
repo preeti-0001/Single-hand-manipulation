@@ -87,7 +87,6 @@ def inspect_arm(base):
             allow_pickle=True,
         )
 
-
 def inspect_processed(base):
     """Inspect processed DexMachina-related data."""
     print("\n" + "#" * 80)
@@ -96,10 +95,16 @@ def inspect_processed(base):
 
     processed_base = os.path.join(base, "processed")
 
-    for name in ["contact_tensor", "validity_mask"]:
+    for name in ["contact_tensor", "validity_mask", "optimized_contact_tensor", "optimized_validity_mask"]:
         inspect(
             f"PROCESSED {name.upper()}",
             os.path.join(processed_base, f"{name}.npy"),
+        )
+    for name in ["grasp_candidates", "ideal_grasps"]:
+        inspect(
+            f"PROCESSED {name.upper()}",
+            os.path.join(processed_base, f"{name}.npy"),
+            allow_pickle=True,
         )
 
 

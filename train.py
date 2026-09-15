@@ -553,7 +553,7 @@ def main():
     }
 
     save_path = (
-        Path("checkpoints")
+        Path("logs/checkpoints")
         / f"ppo_{HAND}_{OBJECT_NAME}_{SCENE}.pt"
     )
 

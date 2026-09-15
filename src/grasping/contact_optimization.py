@@ -3,9 +3,9 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-import genesis as gs
 import numpy as np
 from src.utils.common import  resolve_episode
+import argparse
 
 
 
@@ -14,11 +14,6 @@ from src.utils.common import  resolve_episode
 # ============================================================
 
 DATASET_ROOT = Path("hrdexdb")
-
-HAND = "allegro_v5"
-OBJECT_NAME = "apple"
-SCENE = "4"
-
 FPS = 30.0
 
 
@@ -267,12 +262,46 @@ def optimize_contacts(
 # MAIN
 # ============================================================
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Replay an HRDexDB episode in Genesis."
+    )
+
+    parser.add_argument(
+        "--hand",
+        required=True,
+        type=str,
+        help="Hand name, e.g. allegro_v5",
+    )
+
+    parser.add_argument(
+        "--object_name",
+        required=True,
+        type=str,
+        help="Object name, e.g. apple",
+    )
+
+    parser.add_argument(
+        "--scene",
+        required=True,
+        type=str,
+        help="Scene ID, e.g. 4",
+    )
+
+    return parser.parse_args()
+
+
 def main():
 
     # ========================================================
     # Resolve HRDexDB episode
     # ========================================================
 
+    args = parse_args()
+
+    HAND = args.hand
+    OBJECT_NAME = args.object_name
+    SCENE = args.scene
     ep = resolve_episode(
         dataset_root=DATASET_ROOT,
         hand=HAND,
