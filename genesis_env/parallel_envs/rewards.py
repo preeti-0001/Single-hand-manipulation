@@ -19,14 +19,14 @@ class RewardModule:
         demo_robot_qpos,
         demo_object_trajectories,
         demo_object_quaternions,
-        beta_imitation=10.0,
+        beta_imitation=0.1,
         beta_contact=10.0,
-        beta_position=10.0,
-        beta_rotation=5.0,
-        beta_bc=2.0,
-        lambda_task=1.0,
-        lambda_imitation=1.0,
-        lambda_contact=0.2,
+        beta_position=0.1,
+        beta_rotation=0.5,
+        beta_bc=0.2,
+        lambda_task=0.5,
+        lambda_imitation=0.5,
+        lambda_contact=3.0,
         lambda_bc=0.1,
         contact_dmax=0.05,
     ):
@@ -247,7 +247,7 @@ class RewardModule:
             no_contact_reward.expand(num_envs),
         )
 
-    def compute_total_reward(
+    def compute_reward_terms(
         self,
         current_keypoints,
         current_contacts,

@@ -223,7 +223,7 @@ def train_one_episode(
         # REWARD
         # ========================================================
 
-        reward, contact_quality = reward_module.compute_total_reward(
+        reward = reward_module.compute_total_reward(
             current_keypoints=current_keypoints,
             current_contacts=current_contacts,
             object_pos=object_pos_next,
@@ -233,7 +233,6 @@ def train_one_episode(
             target_frame=target_frame,
         )
         
-        VOC_strength = 1 - contact_quality
 
         total_reward += reward
 

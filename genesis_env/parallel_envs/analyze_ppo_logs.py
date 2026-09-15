@@ -284,6 +284,8 @@ def main():
     parser.add_argument("--outdir", default="logs/ppo_analysis")
     parser.add_argument("--ma-window", type=int, default=5)
     args = parser.parse_args()
+    outdir = Path(args.outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
 
     if args.indir:
         voc = np.load(Path(args.indir) / "voc_metrics.npy", allow_pickle=False)
@@ -296,10 +298,6 @@ def main():
 
         save_npy(voc, outdir / "voc_metrics.npy")
         save_npy(base, outdir / "baseline_metrics.npy")
-
-
-    outdir = Path(args.outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
 
     # Save a common comparison array.
     n = min(len(voc), len(base))
