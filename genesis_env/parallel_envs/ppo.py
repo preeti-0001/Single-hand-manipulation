@@ -225,6 +225,7 @@ def train_one_episode(
 
         reward = reward_module.compute_total_reward(
             current_keypoints=current_keypoints,
+            current_qpos=robot_qpos,
             current_contacts=current_contacts,
             object_pos=object_pos_next,
             object_quat=object_quat_next,

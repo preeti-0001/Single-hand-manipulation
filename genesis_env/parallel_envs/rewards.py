@@ -19,11 +19,15 @@ class RewardModule:
         demo_robot_qpos,
         demo_object_trajectories,
         demo_object_quaternions,
+        demo_ideal_grasps, 
         beta_imitation=0.1,
         beta_contact=10.0,
         beta_position=0.1,
         beta_rotation=0.5,
         beta_bc=0.2,
+        beta_grasp_position=20.0,
+        beta_grasp_qpos=1.0,
+        lambda_grasp=3.0,
         lambda_task=0.5,
         lambda_imitation=0.5,
         lambda_contact=3.0,
@@ -44,6 +48,10 @@ class RewardModule:
         self.beta_position = beta_position
         self.beta_rotation = beta_rotation
         self.beta_bc = beta_bc
+        self.beta_grasp_position = beta_grasp_position
+        self.beta_grasp_qpos = beta_grasp_qpos
+        self.lambda_grasp = lambda_grasp
+        self.demo_ideal_grasps = demo_ideal_grasps
 
         self.lambda_task = lambda_task
         self.lambda_imitation = lambda_imitation
@@ -152,6 +160,150 @@ class RewardModule:
             -self.beta_bc * error
         ).mean(dim=-1)
 
+    def compute_grasp_reward(
+        self,
+        current_keypoints,
+        current_contacts,
+        current_qpos,
+    ):
+        """
+        Reward the robot for approaching the demonstrated ideal grasp.
+    
+        Returns:
+            [num_envs]
+        """
+    
+        device = current_qpos.device
+        dtype = current_qpos.dtype
+    
+        # --------------------------------------------------------
+        # Ideal grasp
+        # --------------------------------------------------------
+    
+        grasp = self.demo_ideal_grasps[0]
+    
+        target_position = self._tensor(
+            grasp["position"],
+            device,
+            dtype,
+        )
+    
+        target_qpos = self._tensor(
+            grasp["qpos"],
+            device,
+            dtype,
+        )
+    
+        target_contact_links = self._tensor(
+            grasp["contact_links"],
+            device,
+        ).bool()
+    
+        # --------------------------------------------------------
+        # 1. GRASP POSITION
+        # --------------------------------------------------------
+    
+        # Use current contact centroid when contacts exist.
+        positions = current_contacts["position"]
+        valid = current_contacts["valid_mask"]
+    
+        has_contact = valid.any(dim=-1)
+    
+        current_centroid = torch.zeros(
+            positions.shape[0],
+            3,
+            device=device,
+            dtype=dtype,
+        )
+    
+        for i in range(positions.shape[0]):
+    
+            if has_contact[i]:
+    
+                current_centroid[i] = (
+                    positions[i][valid[i]].mean(dim=0)
+                )
+    
+        position_error = (
+            current_centroid - target_position.unsqueeze(0)
+        ).pow(2).sum(dim=-1).sqrt()
+    
+        position_reward = torch.exp(
+            -self.beta_grasp_position * position_error
+        )
+    
+        # No contact -> no grasp-position reward
+        position_reward = torch.where(
+            has_contact,
+            position_reward,
+            torch.zeros_like(position_reward),
+        )
+    
+        # --------------------------------------------------------
+        # 2. GRASP QPOS
+        # --------------------------------------------------------
+    
+        qpos_error = (
+            current_qpos
+            - target_qpos.unsqueeze(0)
+        ).pow(2).mean(dim=-1)
+    
+        qpos_reward = torch.exp(
+            -self.beta_grasp_qpos * qpos_error
+        )
+    
+        # --------------------------------------------------------
+        # 3. CONTACT-LINK MATCHING
+        # --------------------------------------------------------
+    
+        # Current contact information should provide link IDs
+        # if available.
+        current_contact_links = current_contacts.get(
+            "link_mask",
+            None,
+        )
+    
+        if current_contact_links is None:
+    
+            contact_link_reward = torch.zeros(
+                current_qpos.shape[0],
+                device=device,
+                dtype=dtype,
+            )
+    
+        else:
+    
+            current_contact_links = (
+                current_contact_links.bool()
+            )
+    
+            target = target_contact_links.unsqueeze(0)
+    
+            intersection = (
+                current_contact_links & target
+            ).sum(dim=-1).float()
+    
+            target_count = (
+                target_contact_links.sum()
+                .clamp_min(1)
+            )
+    
+            contact_link_reward = (
+                intersection / target_count
+            )
+    
+        # --------------------------------------------------------
+        # FINAL GRASP REWARD
+        # --------------------------------------------------------
+    
+        grasp_reward = (
+            0.4 * position_reward
+            + 0.3 * qpos_reward
+            + 0.3 * contact_link_reward
+        )
+    
+        return grasp_reward
+
     def compute_contact_reward(
         self,
         current_contacts,
@@ -250,6 +402,7 @@ class RewardModule:
     def compute_reward_terms(
         self,
         current_keypoints,
+        current_qpos,
         current_contacts,
         object_pos,
         object_quat,
@@ -279,11 +432,18 @@ class RewardModule:
             frame_id,
         )
 
+        grasp = self.compute_grasp_reward(
+            current_qpos=current_qpos,
+            current_keypoints=current_keypoints,
+            current_contacts=current_contacts,
+        )
+
         total = (
             self.lambda_task * task
             + self.lambda_imitation * imitation
             + self.lambda_contact * contact
             + self.lambda_bc * bc
+            + self.lambda_grasp * grasp
         )
 
         return {
@@ -291,12 +451,14 @@ class RewardModule:
             "imitation": imitation,
             "contact": contact,
             "bc": bc,
+            "grasp": grasp,
             "total": total,
         }
 
     def compute_total_reward(
         self,
         current_keypoints,
+        current_qpos,
         current_contacts,
         object_pos,
         object_quat,
@@ -306,6 +468,7 @@ class RewardModule:
     ):
         return self.compute_reward_terms(
             current_keypoints=current_keypoints,
+            current_qpos=current_qpos,
             current_contacts=current_contacts,
             object_pos=object_pos,
             object_quat=object_quat,

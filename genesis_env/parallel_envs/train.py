@@ -20,7 +20,6 @@ from .ppo import train_parallel_episode as train_parallel_episode_without_voc
 from .voc.ppo import train_parallel_episode as train_parallel_episode_with_voc
 from .rewards import RewardModule
 
-
 DATASET_ROOT = Path("hrdexdb")
 FPS = 30.0
 NUM_ENVS = 128
@@ -110,11 +109,9 @@ def main():
     # DEMONSTRATION
     # ============================================================
 
-    qpos, video_time, frame_ids, hand_dof, arm_dof = (
-        load_robot_qpos_on_video_timeline(
-            ep.episode_root,
-            ep.hand,
-        )
+    qpos, video_time, frame_ids, hand_dof, arm_dof = load_robot_qpos_on_video_timeline(
+        ep.episode_root,
+        ep.hand,
     )
 
     object_poses = load_object_trajectory(
@@ -151,9 +148,7 @@ def main():
         ),
     )
 
-    scene.add_entity(
-        gs.morphs.Plane()
-    )
+    scene.add_entity(gs.morphs.Plane())
 
     robot = scene.add_entity(
         gs.morphs.URDF(
@@ -168,9 +163,7 @@ def main():
 
     first_position = first_pose[:3, 3]
 
-    first_quat = matrix_to_wxyz(
-        first_pose[:3, :3]
-    )
+    first_quat = matrix_to_wxyz(first_pose[:3, :3])
 
     obj = scene.add_entity(
         gs.morphs.Mesh(
@@ -194,19 +187,14 @@ def main():
         env_spacing=(1.0, 1.0),
     )
 
-    print(
-        f"\nCreated {NUM_PARALLEL_ENVS} parallel worlds."
-    )
+    print(f"\nCreated {NUM_PARALLEL_ENVS} parallel worlds.")
 
     # ============================================================
     # DOFS
     # ============================================================
 
     motors_dof_idx = [
-        robot.get_joint(
-            joint.name
-        ).dofs_idx_local[0]
-        for joint in robot.joints
+        robot.get_joint(joint.name).dofs_idx_local[0] for joint in robot.joints
     ]
 
     robot_dof = len(motors_dof_idx)
@@ -220,8 +208,7 @@ def main():
 
     if robot_dof != qpos.shape[1]:
         raise RuntimeError(
-            "Action DOF mismatch: "
-            f"Genesis={robot_dof}, HRDexDB={qpos.shape[1]}"
+            "Action DOF mismatch: " f"Genesis={robot_dof}, HRDexDB={qpos.shape[1]}"
         )
 
     device = robot.get_qpos().device
@@ -238,25 +225,13 @@ def main():
     )
 
     demo_object_positions = torch.as_tensor(
-        np.asarray(
-            [
-                T[:3, 3]
-                for T in object_poses[:timeline_len]
-            ]
-        ),
+        np.asarray([T[:3, 3] for T in object_poses[:timeline_len]]),
         device=device,
         dtype=dtype,
     )
 
     demo_object_quaternions = torch.as_tensor(
-        np.asarray(
-            [
-                matrix_to_wxyz(
-                    T[:3, :3]
-                )
-                for T in object_poses[:timeline_len]
-            ]
-        ),
+        np.asarray([matrix_to_wxyz(T[:3, :3]) for T in object_poses[:timeline_len]]),
         device=device,
         dtype=dtype,
     )
@@ -273,9 +248,7 @@ def main():
     for frame in range(timeline_len):
 
         robot.set_dofs_position(
-            demo_robot_qpos[frame]
-            .unsqueeze(0)
-            .expand(NUM_PARALLEL_ENVS, -1),
+            demo_robot_qpos[frame].unsqueeze(0).expand(NUM_PARALLEL_ENVS, -1),
             motors_dof_idx,
             zero_velocity=True,
         )
@@ -284,33 +257,22 @@ def main():
 
         # Store only one copy because all 128 environments are
         # initialized identically during demonstration extraction.
-        demo_robot_keypoints.append(
-            links_pos[0].detach()
-        )
+        demo_robot_keypoints.append(links_pos[0].detach())
 
     # ============================================================
     # CONTACT DEMONSTRATION
     # ============================================================
 
-    output_dir = (
-        ep.episode_root / "processed"
-    )
+    output_dir = ep.episode_root / "processed"
 
-    contact_file = (
-        output_dir / "contact_tensor.npy"
-    )
+    contact_file = output_dir / "contact_tensor.npy"
 
-    mask_file = (
-        output_dir / "validity_mask.npy"
-    )
+    mask_file = output_dir / "validity_mask.npy"
+    demo_ideal_grasps = np.load(output_dir / "ideal_grasps.npy", allow_pickle=True)
 
-    demo_contact_tensor = np.load(
-        contact_file
-    )[:timeline_len]
+    demo_contact_tensor = np.load(contact_file)[:timeline_len]
 
-    demo_contact_validity = np.load(
-        mask_file
-    )[:timeline_len]
+    demo_contact_validity = np.load(mask_file)[:timeline_len]
 
     # ============================================================
     # REWARD
@@ -323,21 +285,24 @@ def main():
         demo_robot_qpos=demo_robot_qpos,
         demo_object_trajectories=demo_object_positions,
         demo_object_quaternions=demo_object_quaternions,
-
+        demo_ideal_grasps=demo_ideal_grasps,
         # Reward design:
         #
         # Robot trajectory and object trajectory are primary.
         # Contact and BC are auxiliary.
-        beta_imitation=10.0,
+        beta_imitation=0.1,
         beta_contact=10.0,
-        beta_position=10.0,
-        beta_rotation=5.0,
-        beta_bc=2.0,
-
-        lambda_task=1.0,
-        lambda_imitation=1.0,
-        lambda_contact=0.2,
+        beta_position=0.1,
+        beta_rotation=0.5,
+        beta_bc=0.2,
+        beta_grasp_position=20.0,
+        beta_grasp_qpos=1.0,
+        lambda_grasp=3.0,
+        lambda_task=5.0,
+        lambda_imitation=50,
+        lambda_contact=3.0,
         lambda_bc=0.1,
+        contact_dmax=0.05,
     )
 
     # ============================================================
@@ -354,28 +319,20 @@ def main():
 
     print(
         "Actor parameters :",
-        sum(
-            p.numel()
-            for p in actor.parameters()
-        ),
+        sum(p.numel() for p in actor.parameters()),
     )
 
     print(
         "Critic parameters:",
-        sum(
-            p.numel()
-            for p in critic.parameters()
-        ),
+        sum(p.numel() for p in critic.parameters()),
     )
 
     # ============================================================
     # TRAIN
     # ============================================================
 
-    print(
-        "\n========== PPO TRAINING =========="
-    )
-    if (args.without_voc):
+    print("\n========== PPO TRAINING ==========")
+    if args.without_voc:
         train_parallel_episode = train_parallel_episode_without_voc
     else:
         train_parallel_episode = train_parallel_episode_with_voc
@@ -396,9 +353,7 @@ def main():
         action_scale=args.action_scale,
     )
 
-    print(
-        "\n========== TRAINING COMPLETE =========="
-    )
+    print("\n========== TRAINING COMPLETE ==========")
 
 
 if __name__ == "__main__":
